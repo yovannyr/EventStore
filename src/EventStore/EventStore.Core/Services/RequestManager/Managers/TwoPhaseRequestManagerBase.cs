@@ -147,9 +147,15 @@ namespace EventStore.Core.Services.RequestManager.Managers
                 return;
 
             if (_awaitingPrepare != 0)
+            {
+                _completed = true;
                 CompleteFailedRequest(OperationResult.PrepareTimeout, "Prepare phase timeout.");
-            else 
+            }
+            else
+            {
+                _completed = true;
                 CompleteFailedRequest(OperationResult.CommitTimeout, "Commit phase timeout.");
+            }
         }
 
         private static readonly ILogger Log = LogManager.GetLoggerFor<TwoPhaseRequestManagerBase>();

@@ -33,7 +33,7 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk
 {
     internal class WriterWorkItem
     {
-        public readonly FileStream Stream;
+        public readonly UnbufferedIOFileStream Stream;
         public readonly BinaryWriter Writer;
         public readonly MemoryStream Buffer;
         public readonly BinaryWriter BufferWriter;
@@ -41,7 +41,7 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk
 
         public UnmanagedMemoryStream UnmanagedMemoryStream;
 
-        public WriterWorkItem(FileStream stream, BinaryWriter writer, MD5 md5)
+        public WriterWorkItem(UnbufferedIOFileStream stream, BinaryWriter writer, MD5 md5)
         {
             Stream = stream;
             Writer = writer;

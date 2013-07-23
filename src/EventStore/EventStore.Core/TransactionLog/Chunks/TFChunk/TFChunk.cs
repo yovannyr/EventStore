@@ -67,6 +67,7 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk
         public ChunkHeader ChunkHeader { get { return _chunkHeader; } }
         public ChunkFooter ChunkFooter { get { return _chunkFooter; } }
         public readonly int MidpointsDepth;
+        private readonly bool _unbuffered;
 
         public int RawWriterPosition 
         {
@@ -118,6 +119,7 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk
             _internalStreamsCount = initialReaderCount;
             _maxReaderCount = maxReaderCount;
             MidpointsDepth = midpointsDepth;
+            
         }
 
         ~TFChunk()
@@ -310,8 +312,10 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk
             tempFile.Close();
             File.Move(tempFilename, _filename);
 
-            var stream = new FileStream(_filename, FileMode.Open, FileAccess.ReadWrite, FileShare.Read,
-                                        WriteBufferSize, FileOptions.SequentialScan);
+            //var stream = new FileStream(_filename, FileMode.Open, FileAccess.ReadWrite, FileShare.Read,
+            //                            WriteBufferSize, FileOptions.SequentialScan);
+            var stream = UnbufferedIOFileStream.Create(
+                _filename, FileMode.Open, FileAccess.ReadWrite, FileShare.Read, true, 512*32);
             stream.Position = ChunkHeader.Size;
             var writer = new BinaryWriter(stream);
             _writerWorkItem = new WriterWorkItem(stream, writer, md5);
@@ -321,8 +325,10 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk
         private void CreateWriterWorkItemForExistingChunk(int writePosition, out ChunkHeader chunkHeader)
         {
             var md5 = MD5.Create();
-            var stream = new FileStream(_filename, FileMode.Open, FileAccess.ReadWrite, FileShare.Read,
-                                        WriteBufferSize, FileOptions.SequentialScan);
+            //var stream = new FileStream(_filename, FileMode.Open, FileAccess.ReadWrite, FileShare.Read,
+            //                            WriteBufferSize, FileOptions.SequentialScan);
+            var stream = UnbufferedIOFileStream.Create(
+                _filename, FileMode.Open, FileAccess.ReadWrite, FileShare.Read, true, 512 * 64);
             var writer = new BinaryWriter(stream);
             try
             {
@@ -598,11 +604,12 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk
             bufferWriter.Write(length); // length suffix
             buffer.Position = 0;
             bufferWriter.Write(length); // length prefix
-
+            //workItem.Stream.Flush();
             if (stream.Position + length + 2*sizeof(int) > ChunkHeader.Size + _chunkHeader.ChunkSize) 
                 return RecordWriteResult.Failed(GetDataPosition(workItem));
 
             var oldPosition = WriteRawData(workItem, buffer);
+            //workItem.Stream.Flush();
             _physicalDataSize = (int)GetDataPosition(workItem); // should fit 32 bits
             _logicalDataSize = ChunkHeader.GetLocalLogPosition(record.LogPosition + length + 2*sizeof(int));
             
@@ -657,8 +664,7 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk
         {
             if (_isReadOnly) 
                 throw new InvalidOperationException("Cannot write to a read-only TFChunk.");
-
-            _writerWorkItem.Stream.Flush(flushToDisk: true);
+            _writerWorkItem.Stream.Flush();
 
 #if LESS_THAN_NET_4_0
             Win32.FlushFileBuffers(_fileStream.SafeFileHandle);

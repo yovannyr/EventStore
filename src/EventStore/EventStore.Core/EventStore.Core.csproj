@@ -202,6 +202,7 @@
     <Compile Include="Settings\ESConsts.cs" />
     <Compile Include="Settings\VNodeSettings.cs" />
     <Compile Include="TransactionLog\Checkpoint\Checkpoint.cs" />
+    <Compile Include="TransactionLog\Chunks\TestingCrap.cs" />
     <Compile Include="TransactionLog\Chunks\TFChunkDbTruncator.cs" />
     <Compile Include="TransactionLog\Chunks\TFChunk\BulkReadResult.cs" />
     <Compile Include="TransactionLog\Chunks\TFChunk\PosMap.cs" />
