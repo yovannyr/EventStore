@@ -152,7 +152,7 @@ namespace EventStore.Core.TransactionLog.Chunks
 
         public override bool CanRead
         {
-            get { return false; }
+            get { return true; }
         }
 
         public override bool CanSeek
