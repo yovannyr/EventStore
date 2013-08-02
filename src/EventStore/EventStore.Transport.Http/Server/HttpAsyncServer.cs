@@ -115,17 +115,20 @@ namespace EventStore.Transport.Http.Server
                 context = _listener.EndGetContext(ar);
                 success = true;
             }
-            catch (HttpListenerException e)
+            catch (HttpListenerException)
             {
-                Logger.ErrorException(e, "EndGetContext error. Status : {0}.", IsListening ? "listening" : "stopped");
+                // that's not application-level error, ignore and continue
             }
-			catch (ObjectDisposedException e)
+			catch (ObjectDisposedException)
 			{
-				Logger.ErrorException(e, "EndGetContext error. Status : {0}.", IsListening ? "listening" : "stopped");
+				// that's ok, just continue
 			}
-            catch (InvalidOperationException e)
+            catch (InvalidOperationException)
             {
-                Logger.ErrorException(e, "EndGetContext error. Status : {0}.", IsListening ? "listening" : "stopped");
+            }
+            catch (Exception e)
+            {
+                Logger.DebugException(e, "EndGetContext exception. Status : {0}.", IsListening ? "listening" : "stopped");
             }
 
             if (success)
@@ -135,11 +138,19 @@ namespace EventStore.Transport.Http.Server
             {
                 _listener.BeginGetContext(ContextAcquired, null);
             }
-            catch (HttpListenerException e)
+            catch (HttpListenerException)
             {
-                Logger.ErrorException(e, "BeginGetContext error. Status : {0}.", IsListening ? "listening" : "stopped");
             }
-            catch (InvalidOperationException e)
+            catch (ObjectDisposedException)
+            {
+            }
+            catch (InvalidOperationException)
+            {
+            }
+            catch (ApplicationException)
+            {
+            }
+            catch (Exception e)
             {
                 Logger.ErrorException(e, "BeginGetContext error. Status : {0}.", IsListening ? "listening" : "stopped");
             }

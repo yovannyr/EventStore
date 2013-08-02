@@ -29,7 +29,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
-using System.Text;
+using System.Threading;
 using EventStore.Common.Utils;
 
 namespace EventStore.Transport.Http.Client
@@ -42,21 +42,50 @@ namespace EventStore.Transport.Http.Client
             ServicePointManager.DefaultConnectionLimit = 500;
         }
 
-        public void Get(string url, Action<HttpResponse> onSuccess, Action<Exception> onException)
+        //TODO GFY
+        //this is a really really stupid way of doing this and it only works properly if
+        //the moons align correctly in the 7th slot of jupiter on a tuesday when mercury
+        //is rising. However it sort of works right now (unless you have proxies/dns/other
+        //problems. The easy solution is to use httpclient from portable libraries but
+        //it is currently limited in license to windows only.
+
+        private void TimeoutCallback(object state, bool timedOut)
+        {
+            if (timedOut)
+            {
+                var req = state as HttpWebRequest;
+                if (req != null)
+                {
+                    req.Abort();
+                }
+            }
+        }
+
+
+
+        public void Get(string url, TimeSpan timeout, Action<HttpResponse> onSuccess, Action<Exception> onException)
         {
             Ensure.NotNull(url, "url");
             Ensure.NotNull(onSuccess, "onSuccess");
             Ensure.NotNull(onException, "onException");
 
-            Receive(HttpMethod.Get, url, onSuccess, onException);
+            Receive(HttpMethod.Get, url, null, timeout, onSuccess, onException);
         }
 
-        public void Post(string url, string body, string contentType, Action<HttpResponse> onSuccess, Action<Exception> onException)
+        public void Get(string url, IEnumerable<KeyValuePair<string,string>> headers, TimeSpan timeout, Action<HttpResponse> onSuccess, Action<Exception> onException)
         {
-            Post(url, body, contentType, null, onSuccess, onException);
+            Ensure.NotNull(url, "url");
+            Ensure.NotNull(onSuccess, "onSuccess");
+            Ensure.NotNull(onException, "onException");
+
+            Receive(HttpMethod.Get, url, headers, timeout, onSuccess, onException);
+        }
+        public void Post(string url, string body, string contentType, TimeSpan timeout, Action<HttpResponse> onSuccess, Action<Exception> onException)
+        {
+            Post(url, body, contentType, null, timeout, onSuccess, onException);
         }
 
-        public void Post(string url, string body, string contentType, IEnumerable<KeyValuePair<string,string>> headers, 
+        public void Post(string url, string body, string contentType, IEnumerable<KeyValuePair<string,string>> headers, TimeSpan timeout,
                          Action<HttpResponse> onSuccess, Action<Exception> onException)
         {
             Ensure.NotNull(url, "url");
@@ -65,19 +94,19 @@ namespace EventStore.Transport.Http.Client
             Ensure.NotNull(onSuccess, "onSuccess");
             Ensure.NotNull(onException, "onException");
 
-            Send(HttpMethod.Post, url, body, contentType, headers, onSuccess, onException);
+            Send(HttpMethod.Post, url, body, contentType, headers, timeout, onSuccess, onException);
         }
 
-        public void Delete(string url, Action<HttpResponse> onSuccess, Action<Exception> onException)
+        public void Delete(string url, TimeSpan timeout, Action<HttpResponse> onSuccess, Action<Exception> onException)
         {
             Ensure.NotNull(url, "url");
             Ensure.NotNull(onSuccess, "onSuccess");
             Ensure.NotNull(onException, "onException");
 
-            Receive(HttpMethod.Delete, url, onSuccess, onException);
+            Receive(HttpMethod.Delete, url, null, timeout, onSuccess, onException);
         }
 
-        public void Put(string url, string body, string contentType, Action<HttpResponse> onSuccess, Action<Exception> onException)
+        public void Put(string url, string body, string contentType, TimeSpan timeout, Action<HttpResponse> onSuccess, Action<Exception> onException)
         {
             Ensure.NotNull(url, "url");
             Ensure.NotNull(body, "body");
@@ -85,13 +114,13 @@ namespace EventStore.Transport.Http.Client
             Ensure.NotNull(onSuccess, "onSuccess");
             Ensure.NotNull(onException, "onException");
 
-            Send(HttpMethod.Put, url, body, contentType, null, onSuccess, onException);
+            Send(HttpMethod.Put, url, body, contentType, null, timeout, onSuccess, onException);
         }
 
-        private void Receive(string method, string url, Action<HttpResponse> onSuccess, Action<Exception> onException)
+        private void Receive(string method, string url, IEnumerable<KeyValuePair<string, string>> headers, TimeSpan timeout,
+                             Action<HttpResponse> onSuccess, Action<Exception> onException)
         {
             var request = (HttpWebRequest)WebRequest.Create(url);
-
             request.Method = method;
 #if __MonoCS__
             request.KeepAlive = false;
@@ -100,17 +129,26 @@ namespace EventStore.Transport.Http.Client
             request.KeepAlive = true;
             request.Pipelined = true;
 #endif
+            if (headers != null)
+            {
+                foreach (var header in headers)
+                {
+                    request.Headers.Add(header.Key, header.Value);
+                }
+            }
 
-            request.BeginGetResponse(ResponseAcquired, new ClientOperationState(request, onSuccess, onException));
+            var result = request.BeginGetResponse(ResponseAcquired, new ClientOperationState(request, onSuccess, onException));
+            ThreadPool.RegisterWaitForSingleObject(result.AsyncWaitHandle, TimeoutCallback, request,
+                           (int)timeout.TotalMilliseconds, true);
+
         }
 
         private void Send(string method, string url, string body, string contentType, 
-                          IEnumerable<KeyValuePair<string, string>> headers, 
+                          IEnumerable<KeyValuePair<string, string>> headers, TimeSpan timeout,
                           Action<HttpResponse> onSuccess, Action<Exception> onException)
         {
             var request = (HttpWebRequest)WebRequest.Create(url);
             var bodyBytes = Helper.UTF8NoBom.GetBytes(body);
-
             request.Method = method;
             request.KeepAlive = true;
             request.Pipelined = true;
@@ -129,7 +167,10 @@ namespace EventStore.Transport.Http.Client
             {
                 InputStream = new MemoryStream(bodyBytes)
             };
-            request.BeginGetRequestStream(GotRequestStream, state);
+            var result = request.BeginGetRequestStream(GotRequestStream, state);
+            ThreadPool.RegisterWaitForSingleObject(result.AsyncWaitHandle, TimeoutCallback, request,
+                           (int)timeout.TotalMilliseconds, true);
+
         }
 
         private void ResponseAcquired(IAsyncResult ar)

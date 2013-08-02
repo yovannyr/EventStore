@@ -130,11 +130,11 @@ namespace EventStore.TestClient.Commands
                             {
                                 new TcpClientMessageDto.NewEvent(Guid.NewGuid().ToByteArray(),
                                                                  "TakeSomeSpaceEvent",
-                                                                 false,
+                                                                 0,0,
                                                                  Common.Utils.Helper.UTF8NoBom.GetBytes("DATA" + new string('*', dataSize)),
                                                                  Common.Utils.Helper.UTF8NoBom.GetBytes("METADATA" + new string('$', metadataSize)))
                             },
-                            true);
+                            false);
                         var package = new TcpPackage(TcpCommand.WriteEvents, Guid.NewGuid(), write.Serialize());
                         client.EnqueueSend(package.AsByteArray());
                         autoEvent.WaitOne();

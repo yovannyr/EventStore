@@ -76,6 +76,11 @@ namespace EventStore.Projections.Core.Services.Processing
                 throw new InvalidOperationException("Paused");
             _eventsRequested = false;
 
+            if (message.Result == ReadAllResult.AccessDenied)
+            {
+                SendNotAuthorized();
+                return;
+            }
 
             var eof = message.Events.Length == 0;
             var willDispose = _stopOnEof && eof;
@@ -148,9 +153,9 @@ namespace EventStore.Projections.Core.Services.Processing
         private Message CreateReadEventsMessage()
         {
             return new ClientMessage.ReadAllEventsForward(
-                EventReaderCorrelationId, new SendToThisEnvelope(this), _from.CommitPosition,
+                Guid.NewGuid(), EventReaderCorrelationId, new SendToThisEnvelope(this), _from.CommitPosition,
                 _from.PreparePosition == -1 ? _from.CommitPosition : _from.PreparePosition, _maxReadCount, 
-                _resolveLinkTos, null, ReadAs);
+                _resolveLinkTos, false, null, ReadAs);
         }
 
         private void DeliverLastCommitPosition(TFPos lastPosition)

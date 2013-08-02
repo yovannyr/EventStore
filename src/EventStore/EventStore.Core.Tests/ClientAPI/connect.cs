@@ -63,7 +63,7 @@ namespace EventStore.Core.Tests.ClientAPI
             }
         }
 
-        [Test, Category("Network")]
+        [Test, Category("Network"), Platform("WIN")]
         public void should_throw_exception_when_trying_to_reopen_closed_connection()
         {
             ClientApiLoggerBridge.Default.Info("Starting '{0}' test...", "should_throw_exception_when_trying_to_reopen_closed_connection");
@@ -101,7 +101,7 @@ namespace EventStore.Core.Tests.ClientAPI
             }
         }
 
-        [Test, Category("Network")]
+        [Test, Category("Network"), Platform("WIN")]
         public void should_close_connection_after_configured_amount_of_failed_reconnections()
         {
             var closed = new ManualResetEventSlim();
@@ -111,9 +111,9 @@ namespace EventStore.Core.Tests.ClientAPI
                                              .LimitReconnectionsTo(1)
                                              .SetReconnectionDelayTo(TimeSpan.FromMilliseconds(0))
                                              .OnClosed((x, r) => closed.Set())
-                                             .OnConnected(x => Console.WriteLine("Connected..."))
+                                             .OnConnected((x, ep) => Console.WriteLine("Connected to [{0}]...", ep))
                                              .OnReconnecting(x => Console.WriteLine("Reconnecting..."))
-                                             .OnDisconnected(x => Console.WriteLine("Disconnected..."))
+                                             .OnDisconnected((x, ep) => Console.WriteLine("Disconnected from [{0}]...", ep))
                                              .OnErrorOccurred((x, exc) => Console.WriteLine("Error: {0}", exc))
                                              .FailOnNoServerResponse();
             if (_tcpType == TcpType.Ssl)
@@ -140,5 +140,45 @@ namespace EventStore.Core.Tests.ClientAPI
                 PortsHelper.ReturnPort(port);
             }
         }
+
+    }
+
+    [TestFixture, Category("LongRunning")]
+    public class not_connected_tests
+    {
+        private readonly TcpType _tcpType = TcpType.Normal;
+
+        
+        [Test]
+        public void should_timeout_connection_after_configured_amount_time_on_conenct()
+        {
+            var closed = new ManualResetEventSlim();
+            var settings =
+                ConnectionSettings.Create()
+                    .EnableVerboseLogging()
+                    .UseCustomLogger(ClientApiLoggerBridge.Default)
+                    .LimitReconnectionsTo(0)
+                    .SetReconnectionDelayTo(TimeSpan.FromMilliseconds(0))
+                    .OnClosed((x, r) => closed.Set())
+                    .OnConnected((x, ep) => Console.WriteLine("Connected to [{0}]...", ep))
+                    .OnReconnecting(x => Console.WriteLine("Reconnecting..."))
+                    .OnDisconnected((x, ep) => Console.WriteLine("Disconnected from [{0}]...", ep))
+                    .OnErrorOccurred((x, exc) => Console.WriteLine("Error: {0}", exc)).FailOnNoServerResponse()
+                    .WithConnectionTimeoutOf(TimeSpan.FromMilliseconds(1000));
+            if (_tcpType == TcpType.Ssl)
+                settings.UseSslConnection("ES", false);
+
+            var ip = new IPAddress(new byte[] {8, 8, 8, 8}); //NOTE: This relies on Google DNS server being configured to swallow nonsense traffic
+            int port = 4567;
+            using (var connection = EventStoreConnection.Create(settings, new IPEndPoint(ip, port)))
+            {
+                connection.Connect();
+
+                if (!closed.Wait(TimeSpan.FromSeconds(5)))
+                    Assert.Fail("Connection timeout took too long.");
+            }
+
+        }
+
     }
 }

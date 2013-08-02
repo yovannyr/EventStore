@@ -57,7 +57,7 @@ namespace EventStore.Projections.Core.Tests.Services.projections_manager.v8
         private Js1.ReverseCommandHandlerDelegate _reverseCommandHandlerDelegate;
 
         [Test, Explicit, Category("v8"), Category("Manual"), ExpectedException(typeof(Js1Exception))]
-        public void long_execution_of_non_v8_code_does_not_carsh()
+        public void long_execution_of_non_v8_code_does_not_crash()
         {
             _cancelCallbackFactory = (timeout, action) => ThreadPool.QueueUserWorkItem(state =>
                 {
@@ -80,13 +80,14 @@ namespace EventStore.Projections.Core.Tests.Services.projections_manager.v8
             var prelude = new PreludeScript(preludeSource.Item1, preludeSource.Item2, getModuleSource, _cancelCallbackFactory, logger);
             try
             {
-                var cancelToken = 123;
+                //var cancelToken = 123;
                 prelude.ScheduleTerminateExecution();
                 Thread.Sleep(500);
                 _commandHandlerRegisteredCallback = (name, handle) => { };
                 _reverseCommandHandlerDelegate = (name, body) => { };
-                IntPtr query = Js1.CompileQuery(
-                    prelude.GetHandle(), "log(1);", "fn", _commandHandlerRegisteredCallback, _reverseCommandHandlerDelegate);
+                Js1.CompileQuery(
+                    prelude.GetHandle(), "log(1);", "fn", _commandHandlerRegisteredCallback,
+                    _reverseCommandHandlerDelegate);
 
                 prelude.CancelTerminateExecution();
             }

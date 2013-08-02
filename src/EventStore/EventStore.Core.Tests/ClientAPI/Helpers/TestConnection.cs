@@ -36,6 +36,8 @@ namespace EventStore.Core.Tests.ClientAPI.Helpers
 {
     public static class TestConnection
     {
+        //private static bool _running;
+
         public static IEventStoreConnection Create(IPEndPoint endPoint, TcpType tcpType = TcpType.Normal, UserCredentials userCredentials = null)
         {
             return EventStoreConnection.Create(Settings(tcpType, userCredentials), endPoint);
@@ -54,6 +56,10 @@ namespace EventStore.Core.Tests.ClientAPI.Helpers
                                              .UseCustomLogger(ClientApiLoggerBridge.Default)
                                              .EnableVerboseLogging()
                                              //.DisableVerboseLogging()
+                                             .LimitReconnectionsTo(10)
+                                             .LimitRetriesForOperationTo(100)
+                                             .SetTimeoutCheckPeriodTo(TimeSpan.FromMilliseconds(100))
+                                             .SetReconnectionDelayTo(TimeSpan.Zero)
                                              .FailOnNoServerResponse()
                                              .SetOperationTimeoutTo(TimeSpan.FromDays(1));
             if (tcpType == TcpType.Ssl)

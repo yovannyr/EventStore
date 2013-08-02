@@ -52,7 +52,8 @@ namespace EventStore.ClientAPI
                                                                       clusterSettings.ClusterDns,
                                                                       clusterSettings.MaxDiscoverAttempts,
                                                                       clusterSettings.ManagerExternalHttpPort,
-                                                                      clusterSettings.FakeDnsEntries);
+                                                                      clusterSettings.FakeDnsEntries,
+                                                                      clusterSettings.GossipTimeout);
             _conn = new EventStoreNodeConnection(connectionSettings, endPointDiscoverer, connectionName);
         }
 
@@ -129,6 +130,16 @@ namespace EventStore.ClientAPI
         public EventStoreTransaction ContinueTransaction(long transactionId, UserCredentials userCredentials = null)
         {
             return _conn.ContinueTransaction(transactionId, userCredentials);
+        }
+
+        public EventReadResult ReadEvent(string stream, int eventNumber, bool resolveLinkTos, UserCredentials userCredentials = null)
+        {
+            return _conn.ReadEvent(stream, eventNumber, resolveLinkTos, userCredentials);
+        }
+
+        public Task<EventReadResult> ReadEventAsync(string stream, int eventNumber, bool resolveLinkTos, UserCredentials userCredentials = null)
+        {
+            return _conn.ReadEventAsync(stream, eventNumber, resolveLinkTos, userCredentials);
         }
 
         public Task TransactionalWriteAsync(EventStoreTransaction transaction, IEnumerable<EventData> events, UserCredentials userCredentials = null)
@@ -244,24 +255,24 @@ namespace EventStore.ClientAPI
                                             eventAppeared, liveProcessingStarted, subscriptionDropped, userCredentials);
         }
 
-        public void SetStreamMetadata(string stream, int expectedMetastreamVersion, Guid idempotencyId, StreamMetadata metadata, UserCredentials userCredentials = null)
+        public void SetStreamMetadata(string stream, int expectedMetastreamVersion, StreamMetadata metadata, UserCredentials userCredentials = null)
         {
-            _conn.SetStreamMetadata(stream, expectedMetastreamVersion, idempotencyId, metadata, userCredentials);
+            _conn.SetStreamMetadata(stream, expectedMetastreamVersion, metadata, userCredentials);
         }
 
-        public Task SetStreamMetadataAsync(string stream, int expectedMetastreamVersion, Guid idempotencyId, StreamMetadata metadata, UserCredentials userCredentials = null)
+        public Task SetStreamMetadataAsync(string stream, int expectedMetastreamVersion, StreamMetadata metadata, UserCredentials userCredentials = null)
         {
-            return _conn.SetStreamMetadataAsync(stream, expectedMetastreamVersion, idempotencyId, metadata, userCredentials);
+            return _conn.SetStreamMetadataAsync(stream, expectedMetastreamVersion, metadata, userCredentials);
         }
 
-        public void SetStreamMetadata(string stream, int expectedMetastreamVersion, Guid idempotencyId, byte[] metadata, UserCredentials userCredentials = null)
+        public void SetStreamMetadata(string stream, int expectedMetastreamVersion, byte[] metadata, UserCredentials userCredentials = null)
         {
-            _conn.SetStreamMetadata(stream, expectedMetastreamVersion, idempotencyId, metadata, userCredentials);
+            _conn.SetStreamMetadata(stream, expectedMetastreamVersion, metadata, userCredentials);
         }
 
-        public Task SetStreamMetadataAsync(string stream, int expectedMetastreamVersion, Guid idempotencyId, byte[] metadata, UserCredentials userCredentials = null)
+        public Task SetStreamMetadataAsync(string stream, int expectedMetastreamVersion, byte[] metadata, UserCredentials userCredentials = null)
         {
-            return _conn.SetStreamMetadataAsync(stream, expectedMetastreamVersion, idempotencyId, metadata, userCredentials);
+            return _conn.SetStreamMetadataAsync(stream, expectedMetastreamVersion, metadata, userCredentials);
         }
 
         public StreamMetadataResult GetStreamMetadata(string stream, UserCredentials userCredentials = null)
@@ -282,6 +293,16 @@ namespace EventStore.ClientAPI
         public Task<RawStreamMetadataResult> GetStreamMetadataAsRawBytesAsync(string stream, UserCredentials userCredentials = null)
         {
             return _conn.GetStreamMetadataAsRawBytesAsync(stream, userCredentials);
+        }
+
+        public void SetSystemSettings(SystemSettings settings, UserCredentials userCredentials = null)
+        {
+            _conn.SetSystemSettings(settings, userCredentials);
+        }
+
+        public Task SetSystemSettingsAsync(SystemSettings settings, UserCredentials userCredentials = null)
+        {
+            return _conn.SetSystemSettingsAsync(settings, userCredentials);
         }
     }
 }

@@ -29,10 +29,12 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using EventStore.Common.Log;
 using EventStore.Common.Utils;
 using EventStore.Core.Exceptions;
+using EventStore.Core.Util;
 
 namespace EventStore.Core.Index
 {
@@ -105,12 +107,9 @@ namespace EventStore.Core.Index
             // this can happen (very unlikely, though) on master crash
             try
             {
-                _indexMap = IndexMap.FromFile(indexmapFile, IsHashCollision, _maxTablesPerLevel);
-                if (_indexMap.IsCorrupt(_directory))
-                {
-                    _indexMap.Dispose(TimeSpan.FromMilliseconds(5000));
+                if (IsCorrupt(_directory))
                     throw new CorruptIndexException("IndexMap is in unsafe state.");
-                }
+                _indexMap = IndexMap.FromFile(indexmapFile, IsHashCollision, _maxTablesPerLevel);
                 if (_indexMap.CommitCheckpoint >= writerCheckpoint)
                 {
                     _indexMap.Dispose(TimeSpan.FromMilliseconds(5000));
@@ -120,6 +119,8 @@ namespace EventStore.Core.Index
             catch (CorruptIndexException exc)
             {
                 Log.ErrorException(exc, "ReadIndex is corrupted...");
+                LogIndexMapContent(indexmapFile);
+                DumpAndCopyIndex();
                 File.Delete(indexmapFile);
 
                 bool createEmptyIndexMap = true;
@@ -140,6 +141,7 @@ namespace EventStore.Core.Index
                     catch (CorruptIndexException ex)
                     {
                         Log.ErrorException(ex, "Backup IndexMap is also corrupted...");
+                        LogIndexMapContent(backupFile);
                         File.Delete(indexmapFile);
                         File.Delete(backupFile);
                     }
@@ -147,8 +149,8 @@ namespace EventStore.Core.Index
 
                 if (createEmptyIndexMap)
                     _indexMap = IndexMap.FromFile(indexmapFile, IsHashCollision, _maxTablesPerLevel);
-                if (_indexMap.IsCorrupt(_directory))
-                    _indexMap.LeaveUnsafeState(_directory);
+                if (IsCorrupt(_directory))
+                    LeaveUnsafeState(_directory);
             }
             _prepareCheckpoint = _indexMap.PrepareCheckpoint;
             _commitCheckpoint = _indexMap.CommitCheckpoint;
@@ -163,6 +165,38 @@ namespace EventStore.Core.Index
                 var file = Path.Combine(_directory, filePath);
                 File.SetAttributes(file, FileAttributes.Normal);
                 File.Delete(file);
+            }
+        }
+
+        private static void LogIndexMapContent(string indexmapFile)
+        {
+            try
+            {
+                var sb = new StringBuilder();
+                sb.AppendFormat("IndexMap '{0}' content:\n", indexmapFile);
+                sb.AppendLine(Helper.FormatBinaryDump(File.ReadAllBytes(indexmapFile)));
+
+                Log.Error(sb.ToString());
+            }
+            catch (Exception exc)
+            {
+                Log.ErrorException(exc, "Unexpected error while dumping IndexMap '{0}'.", indexmapFile);
+            }
+        }
+
+        private void DumpAndCopyIndex()
+        {
+            string dumpPath = null;
+            try
+            {
+                dumpPath = Path.Combine(Path.GetDirectoryName(_directory),
+                                        string.Format("index-backup-{0:yyyy-MM-dd_HH-mm-ss.fff}", DateTime.UtcNow));
+                Log.Error("Making backup of index folder for inspection to {0}...", dumpPath);
+                FileUtils.DirectoryCopy(_directory, dumpPath, copySubDirs: true);
+            }
+            catch (Exception exc)
+            {
+                Log.ErrorException(exc, "Unexpected error while copying index to backup dir '{0}'", dumpPath);
             }
         }
 
@@ -270,16 +304,24 @@ namespace EventStore.Core.Index
                         if (File.Exists(backupFile))
                             File.Delete(backupFile);
                         if (File.Exists(indexmapFile))
-                            File.Copy(indexmapFile, backupFile);
+                        {
+                            // same as File.Copy(indexmapFile, backupFile); but with forced flush
+                            var indexmapContent = File.ReadAllBytes(indexmapFile);
+                            using (var f = File.Create(backupFile))
+                            {
+                                f.Write(indexmapContent, 0, indexmapContent.Length);
+                                f.Flush(flushToDisk: true);
+                            }
+                        }
                     });
 
-                    _indexMap.EnterUnsafeState(_directory);
+                    EnterUnsafeState(_directory);
 
                     var mergeResult = _indexMap.AddFile(ptable, tableItem.PrepareCheckpoint, tableItem.CommitCheckpoint, _fileNameProvider);
                     _indexMap = mergeResult.MergedMap;
                     _indexMap.SaveToFile(indexmapFile);
 
-                    _indexMap.LeaveUnsafeState(_directory);
+                    LeaveUnsafeState(_directory);
 
                     lock (_awaitingTablesLock)
                     {
@@ -524,6 +566,27 @@ namespace EventStore.Core.Index
                     _indexMap.InOrder().ToList().ForEach(x => x.WaitForDisposal(TimeSpan.FromMilliseconds(5000)));
                 }
             }
+        }
+
+        public static bool IsCorrupt(string directory)
+        {
+            return File.Exists(Path.Combine(directory, "merging.m"));
+        }
+
+        public static void EnterUnsafeState(string directory)
+        {
+            if (!IsCorrupt(directory))
+            {
+                using (var f = File.Create(Path.Combine(directory, "merging.m")))
+                {
+                    f.Flush(flushToDisk: true);
+                }
+            }
+        }
+
+        public static void LeaveUnsafeState(string directory)
+        {
+            File.Delete(Path.Combine(directory, "merging.m"));
         }
 
         private class TableItem

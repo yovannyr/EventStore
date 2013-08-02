@@ -26,11 +26,47 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
+using System;
+using System.ComponentModel;
+using System.Globalization;
 using System.Net;
 using EventStore.Core.TransactionLog.Chunks;
 
 namespace EventStore.Core.Util
 {
+
+    public enum RunProjections
+    {
+        None,
+        System,
+        All
+    }
+
+    [TypeConverter(typeof(RunProjections))]
+    public sealed class RunProjectionsTypeConverter : TypeConverter
+    {
+        public override object ConvertFrom(ITypeDescriptorContext context, CultureInfo culture, object value)
+        {
+            var v = ((string) value).ToLowerInvariant();
+            switch (v)
+            {
+                case "none":
+                    return RunProjections.None;
+                case "system":
+                    return RunProjections.System;
+                case "all":
+                    return RunProjections.All;
+                default:
+                    throw new InvalidCastException();
+            }
+        }
+
+        public override bool CanConvertFrom(ITypeDescriptorContext context, Type sourceType)
+        {
+            return sourceType == typeof(string);
+        }
+    }
+
     public static class Opts
     {
         public const string EnvPrefix = "EVENTSTORE_";
@@ -38,6 +74,13 @@ namespace EventStore.Core.Util
         /*
          *  COMMON OPTIONS 
          */
+
+        public const string ForceCmd = "f|force";
+        public const string ForceEnv = null;
+        public const string ForceJson = null;
+        public const string ForceDescr = "Force the Event Store to run in possibly harmful environments such a with Boehm gc";
+        public const bool ForceDefault = false;
+
 
         public const string LogsCmd = "log|logsdir=";
         public const string LogsEnv = "LOGSDIR";
@@ -87,23 +130,35 @@ namespace EventStore.Core.Util
         public const string ChunksCacheSizeDescr = "The amount of unmanaged memory to use for caching chunks.";
         public const int    ChunksCacheSizeDefault = TFConsts.ChunksCacheSize;
 
+        public const string MinFlushDelayMsCmd = "min-flush-delay=";
+        public const string MinFlushDelayMsEnv = "MIN_FLUSH_DELAY";
+        public const string MinFlushDelayMsJson = "minFlushDelay";
+        public const string MinFlushDelayMsDescr = "The minimum flush delay in milliseconds.";
+        public const int    MinFlushDelayMsDefault = TFConsts.MinFlushDelayMs;
+
         public const string DbPathCmd = "d|db=";
         public const string DbPathEnv = "DB";
         public const string DbPathJson = "db";
         public const string DbPathDescr = "The path the db should be loaded/saved to.";
         public static readonly string DbPathDefault = string.Empty;
 
+        public const string EnableTrustedAuthCmd = "enable-trusted-auth";
+        public const string EnableTrustedAuthEnv = "ENABLE_TRUSTED_AUTH";
+        public const string EnableTrustedAuthJson = "enableTrustedAuth";
+        public const string EnableTrustedAuthDescr = "Enables trusted authentication by an intermediary in the Http";
+        public const bool EnableTrustedAuthDefault = false;
+
         public const string SkipDbVerifyCmd = "do-not-verify-db-hashes-on-startup|skip-db-verify";
         public const string SkipDbVerifyEnv = "SKIP_DB_VERIFY";
         public const string SkipDbVerifyJson = "skipDbVerify";
         public const string SkipDbVerifyDescr = "Bypasses the checking of file hashes of database during startup (allows for faster startup).";
-        public const bool   SkipDbVerifyDefault = false;
+        public const bool SkipDbVerifyDefault = false;
 
-        public const string RunProjectionsCmd = "run-projections";
+        public const string RunProjectionsCmd = "run-projections=";
         public const string RunProjectionsEnv = "RUN_PROJECTIONS";
         public const string RunProjectionsJson = "runProjections";
-        public const string RunProjectionsDescr = "Enables the running of JavaScript projections (experimental).";
-        public const bool   RunProjectionsDefault = false;
+        public const string RunProjectionsDescr = "Enables the running of JavaScript projections.";
+        public const RunProjections RunProjectionsDefault = RunProjections.System;
 
         public const string ProjectionThreadsCmd = "projection-threads=";
         public const string ProjectionThreadsEnv = "PROJECTION_THREADS";
@@ -158,6 +213,33 @@ namespace EventStore.Core.Util
         public const string CertificatePasswordJson = "certificatePassword";
         public const string CertificatePasswordDescr = "The password to certificate in file.";
         public static readonly string CertificatePasswordDefault = string.Empty;
+
+        /*
+         *  SINGLE NODE OPTIONS
+         */
+        public const string IpCmd = "i|ip=";
+        public const string IpEnv = "IP";
+        public const string IpJson = "ip";
+        public const string IpDescr = "The IP address to bind to.";
+        public static readonly IPAddress IpDefault = IPAddress.Loopback;
+
+        public const string TcpPortCmd = "t|tcp-port=";
+        public const string TcpPortEnv = "TCP_PORT";
+        public const string TcpPortJson = "tcpPort";
+        public const string TcpPortDescr = "The port to run the TCP server on.";
+        public const int    TcpPortDefault = 1113;
+
+        public const string SecureTcpPortCmd = "st|sec-tcp-port|secure-tcp-port=";
+        public const string SecureTcpPortEnv = "SEC_TCP_PORT";
+        public const string SecureTcpPortJson = "secureTcpPort";
+        public const string SecureTcpPortDescr = "The port to run the secure TCP server on.";
+        public const int    SecureTcpPortDefault = 0;
+
+        public const string HttpPortCmd = "h|http-port=";
+        public const string HttpPortEnv = "HTTP_PORT";
+        public const string HttpPortJson = "httpPort";
+        public const string HttpPortDescr = "The port to run the HTTP server on.";
+        public const int    HttpPortDefault = 2113;
 
         /*
          *  CLUSTER OPTIONS
@@ -269,5 +351,56 @@ namespace EventStore.Core.Util
         public const string FakeDnsIpsJson = "fakeDnsIps";
         public const string FakeDnsIpsDescr = null;
         public static readonly IPAddress[] FakeDnsIpsDefault = new IPAddress[0];
+
+        public const string UseInternalSslCmd = "use-internal-ssl";
+        public const string UseInternalSslEnv = "USE_INTERNAL_SSL";
+        public const string UseInternalSslJson = "useInternalSsl";
+        public const string UseInternalSslDescr = "Whether to use secure internal communication.";
+        public const bool   UseInternalSslDefault = false;
+
+        public const string SslTargetHostCmd = "ssl-target-host=";
+        public const string SslTargetHostEnv = "SSL_TARGET_HOST";
+        public const string SslTargetHostJson = "sslTargetHost";
+        public const string SslTargetHostDescr = "Target host of server's SSL certificate.";
+        public static readonly string SslTargetHostDefault = "n/a";
+
+        public const string SslValidateServerCmd = "ssl-validate-server";
+        public const string SslValidateServerEnv = "SSL_VALIDATE_SERVER";
+        public const string SslValidateServerJson = "sslValidateServer";
+        public const string SslValidateServerDescr = "Whether to validate that server's certificate is trusted.";
+        public const bool   SslValidateServerDefault = true;
+
+        /*
+         *  MANAGER OPTIONS 
+         */
+        public const string EnableWatchdogCmd = "w|watchdog";
+        public const string EnableWatchdogEnv = "WATCHDOG";
+        public const string EnableWatchdogJson = "watchdog";
+        public const string EnableWatchdogDescr = null;
+        public const bool   EnableWatchdogDefault = true;
+
+        public const string WatchdogConfigCmd = "watchdog-config=";
+        public const string WatchdogConfigEnv = "WATCHDOG_CONFIG";
+        public const string WatchdogConfigJson = "watchdogConfig";
+        public const string WatchdogConfigDescr = null;
+        public static readonly string WatchdogConfigDefault = string.Empty;
+
+        public const string WatchdogStateCmd = "watchdog-state=";
+        public const string WatchdogStateEnv = "WATCHDOG_STATE";
+        public const string WatchdogStateJson = "watchdogState";
+        public const string WatchdogStateDescr = null;
+        public static readonly string WatchdogStateDefault = string.Empty;
+
+        public const string WatchdogFailureTimeWindowCmd = "watchdog-failure-time-window=";
+        public const string WatchdogFailureTimeWindowEnv = "WATCHDOG_FAILURE_TIME_WINDOW";
+        public const string WatchdogFailureTimeWindowJson = "watchdogFailureTimeWindow";
+        public const string WatchdogFailureTimeWindowDescr = "The time window for which to track supervised node failures.";
+        public static readonly int WatchdogFailureTimeWindowDefault = -1;
+
+        public const string WatchdogFailureCountCmd = "watchdog-failure-count=";
+        public const string WatchdogFailureCountEnv = "WATCHDOG_FAILURE_COUNT";
+        public const string WatchdogFailureCountJson = "watchdogFailureCount";
+        public const string WatchdogFailureCountDescr = "The maximum allowed supervised node failures within specified time window.";
+        public static readonly int WatchdogFailureCountDefault = -1;
     }
 }

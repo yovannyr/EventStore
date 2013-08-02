@@ -34,7 +34,7 @@ namespace EventStore.Core.Services.Transport.Http
 {
     public interface IUriRouter
     {
-        void RegisterControllerAction(ControllerAction action, Action<HttpEntityManager, UriTemplateMatch> handler);
+        void RegisterAction(ControllerAction action, Action<HttpEntityManager, UriTemplateMatch> handler);
         List<UriToActionMatch> GetAllUriMatches(Uri uri);
     }
 
@@ -45,7 +45,7 @@ namespace EventStore.Core.Services.Transport.Http
 
         private readonly RouterNode _root = new RouterNode();
 
-        public void RegisterControllerAction(ControllerAction action, Action<HttpEntityManager, UriTemplateMatch> handler)
+        public void RegisterAction(ControllerAction action, Action<HttpEntityManager, UriTemplateMatch> handler)
         {
             Ensure.NotNull(action, "action");
             Ensure.NotNull(handler, "handler");
@@ -77,7 +77,12 @@ namespace EventStore.Core.Services.Transport.Http
             var matches = new List<UriToActionMatch>();
             var baseAddress = new UriBuilder(uri.Scheme, uri.Host, uri.Port).Uri;
 
-            var segments = uri.Segments;
+
+            var segments = new string[uri.Segments.Length];
+            for (int i = 0; i < uri.Segments.Length; i++)
+            {
+                segments[i] = Uri.UnescapeDataString(uri.Segments[i]);
+            }
             GetAllUriMatches(_root, baseAddress, uri, segments, 0, matches);
 
             return matches;
@@ -127,7 +132,7 @@ namespace EventStore.Core.Services.Transport.Http
     {
         private readonly List<HttpRoute> _actions = new List<HttpRoute>();
 
-        public void RegisterControllerAction(ControllerAction action, Action<HttpEntityManager, UriTemplateMatch> handler)
+        public void RegisterAction(ControllerAction action, Action<HttpEntityManager, UriTemplateMatch> handler)
         {
             if (_actions.Contains(x => x.Action.Equals(action)))
                 throw new ArgumentException("Duplicate route.");

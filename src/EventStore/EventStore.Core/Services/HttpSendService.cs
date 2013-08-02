@@ -33,20 +33,65 @@ using System.Threading.Tasks;
 using EventStore.Common.Log;
 using EventStore.Common.Utils;
 using EventStore.Core.Bus;
+using EventStore.Core.Data;
 using EventStore.Core.Messages;
+using EventStore.Core.Services.Transport.Http;
 using EventStore.Transport.Http;
 using EventStore.Transport.Http.EntityManagement;
 using HttpStatusCode = EventStore.Transport.Http.HttpStatusCode;
 
 namespace EventStore.Core.Services
 {
-    public class HttpSendService : IHandle<HttpMessage.HttpSend>,
+    public class HttpSendService : IHttpForwarder,
+                                   IHandle<SystemMessage.StateChangeMessage>,
+                                   IHandle<HttpMessage.SendOverHttp>,
+                                   IHandle<HttpMessage.HttpSend>,
                                    IHandle<HttpMessage.HttpBeginSend>,
                                    IHandle<HttpMessage.HttpSendPart>,
-                                   IHandle<HttpMessage.HttpEndSend>,
-                                   IHandle<HttpMessage.HttpForwardMessage>
+                                   IHandle<HttpMessage.HttpEndSend>
     {
         private static readonly ILogger Log = LogManager.GetLoggerFor<HttpSendService>();
+        
+        private readonly HttpMessagePipe _httpPipe;
+        private readonly bool _forwardRequests;
+
+        private VNodeInfo _masterInfo;
+
+        public HttpSendService(HttpMessagePipe httpPipe, bool forwardRequests)
+        {
+            Ensure.NotNull(httpPipe, "httpPipe");
+            _httpPipe = httpPipe;
+            _forwardRequests = forwardRequests;
+        }
+
+        public void Handle(SystemMessage.StateChangeMessage message)
+        {
+            switch (message.State)
+            {
+                case VNodeState.PreReplica:
+                case VNodeState.CatchingUp:
+                case VNodeState.Clone:
+                case VNodeState.Slave:
+                    _masterInfo = ((SystemMessage.ReplicaStateMessage) message).Master;
+                    break;
+                case VNodeState.Initializing:
+                case VNodeState.Unknown:
+                case VNodeState.PreMaster:
+                case VNodeState.Master:
+                case VNodeState.Manager:
+                case VNodeState.ShuttingDown:
+                case VNodeState.Shutdown:
+                    _masterInfo = null;
+                    break;
+                default:
+                    throw new Exception(string.Format("Unknown node state: {0}.", message.State));
+            }
+        }
+
+        public void Handle(HttpMessage.SendOverHttp message)
+        {
+            _httpPipe.Push(message.Message, message.EndPoint);
+        }
 
         public void Handle(HttpMessage.HttpSend message)
         {
@@ -66,7 +111,7 @@ namespace EventStore.Core.Services
                 message.HttpEntityManager.ReplyStatus(
                     code,
                     deniedToHandle.Details,
-                    exc => Log.ErrorException(exc, "Error occurred while replying to HTTP with message {0}", message.Message));
+                    exc => Log.Debug("Error occurred while replying to HTTP with message {0}: {1}.", message.Message, exc.Message));
             }
             else
             {
@@ -78,7 +123,7 @@ namespace EventStore.Core.Services
                     config.Description,
                     config.ContentType,
                     config.Headers,
-                    exc => Log.ErrorException(exc, "Error occurred while replying to HTTP with message {0}", message.Message));
+                    exc => Log.Debug("Error occurred while replying to HTTP with message {0}: {1}.", message.Message, exc.Message));
             }
         }
 
@@ -96,7 +141,7 @@ namespace EventStore.Core.Services
             var response = message.Data;
             message.HttpEntityManager.ContinueReplyTextContent(
                 response,
-                exc => Log.ErrorException(exc, "Error occurred while replying to HTTP with message {0}", message),
+                exc => Log.Debug("Error occurred while replying to HTTP with message {0}: {1}.", message, exc.Message),
                 () =>
                 {
                     if (message.Envelope != null)
@@ -111,12 +156,19 @@ namespace EventStore.Core.Services
                 message.Envelope.ReplyWith(new HttpMessage.HttpCompleted(message.CorrelationId, message.HttpEntityManager));
         }
 
-        public void Handle(HttpMessage.HttpForwardMessage message)
+        bool IHttpForwarder.ForwardRequest(HttpEntityManager manager)
         {
-            var srcUrl = message.Manager.RequestedUrl;
-            var srcBase = new Uri(string.Format("{0}://{1}:{2}/", srcUrl.Scheme, srcUrl.Host, srcUrl.Port));
-            var forwardUri = new Uri(message.BaseUri, srcBase.MakeRelativeUri(srcUrl));
-            ForwardRequest(message.Manager, forwardUri);
+            var masterInfo = _masterInfo;
+            if (_forwardRequests && masterInfo != null)
+            {
+                var srcUrl = manager.RequestedUrl;
+                var srcBase = new Uri(string.Format("{0}://{1}:{2}/", srcUrl.Scheme, srcUrl.Host, srcUrl.Port), UriKind.Absolute);
+                var baseUri = new Uri(string.Format("http://{0}/", masterInfo.InternalHttp));
+                var forwardUri = new Uri(baseUri, srcBase.MakeRelativeUri(srcUrl));
+                ForwardRequest(manager, forwardUri);
+                return true;
+            }
+            return false;
         }
 
         private static void ForwardRequest(HttpEntityManager manager, Uri forwardUri)
@@ -159,10 +211,10 @@ namespace EventStore.Core.Services
                 Task.Factory.FromAsync<Stream>(fwReq.BeginGetRequestStream, fwReq.EndGetRequestStream, null)
                     .ContinueWith(t =>
                     {
-                        if (t.IsFaulted)
+                        if (t.Exception != null)
                         {
-                            Log.ErrorException(t.Exception.InnerException,
-                                               "Error on GetRequestStream for forwarded request for '{0}'.", manager.RequestedUrl);
+                            Log.Debug("Error on GetRequestStream for forwarded request for '{0}': {1}.",
+                                      manager.RequestedUrl, t.Exception.InnerException.Message);
                             ForwardReplyFailed(manager);
                             return;
                         }
@@ -176,8 +228,8 @@ namespace EventStore.Core.Services
                                 var fwReqStream = (Stream)copier.AsyncState;
                                 if (copier.Error != null)
                                 {
-                                    Log.ErrorException(copier.Error, "Error while forwarding request body from '{0}' to '{1}' ({2}).",
-                                                       srcReq.Url, forwardUri, srcReq.HttpMethod);
+                                    Log.Debug("Error while forwarding request body from '{0}' to '{1}' ({2}): {3}.",
+                                              srcReq.Url, forwardUri, srcReq.HttpMethod, copier.Error.Message);
                                     ForwardReplyFailed(manager);
                                 }
                                 else
@@ -205,7 +257,7 @@ namespace EventStore.Core.Services
                 .ContinueWith(t =>
                 {
                     HttpWebResponse response;
-                    if (t.IsFaulted)
+                    if (t.Exception != null)
                     {
                         var exc = t.Exception.InnerException as WebException;
                         if (exc != null)
@@ -214,8 +266,8 @@ namespace EventStore.Core.Services
                         }
                         else
                         {
-                            Log.ErrorException(t.Exception.InnerException,
-                                               "Error on EndGetResponse for forwarded request for '{0}'.", manager.RequestedUrl);
+                            Log.Debug("Error on EndGetResponse for forwarded request for '{0}': {1}.",
+                                      manager.RequestedUrl, t.Exception.InnerException.Message);
                             ForwardReplyFailed(manager);
                             return;
                         }
@@ -225,7 +277,7 @@ namespace EventStore.Core.Services
                         response = (HttpWebResponse) t.Result;
                     }
 
-                    manager.ForwardReply(response, exc => Log.ErrorException(exc, "Error forwarding response for '{0}'.", manager.RequestedUrl));
+                    manager.ForwardReply(response, exc => Log.Debug("Error forwarding response for '{0}': {1}.", manager.RequestedUrl, exc.Message));
                 });
         }
     }

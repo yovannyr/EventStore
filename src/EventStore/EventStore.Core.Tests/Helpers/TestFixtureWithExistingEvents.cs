@@ -224,7 +224,7 @@ namespace EventStore.Core.Tests.Helpers
                 message.Envelope.ReplyWith(
                     new ClientMessage.ReadStreamEventsBackwardCompleted(
                         message.CorrelationId, message.EventStreamId, message.FromEventNumber, message.MaxCount,
-                        ReadStreamResult.StreamDeleted, new ResolvedEvent[0], string.Empty, -1, -1, true, _fakePosition));
+                        ReadStreamResult.StreamDeleted, new ResolvedEvent[0], null, false, string.Empty, -1, -1, true, _fakePosition));
                             
             }
             else if (_lastMessageReplies.TryGetValue(message.EventStreamId, out list) || _noOtherStreams)
@@ -237,14 +237,14 @@ namespace EventStore.Core.Tests.Helpers
                             .Reverse()
                             .SkipWhile(v => message.FromEventNumber != -1 && v.EventNumber > message.FromEventNumber)
                             .Take(message.MaxCount)
-                            .Select(v => BuildEvent(v, message.ResolveLinks))
+                            .Select(v => BuildEvent(v, message.ResolveLinkTos))
                             .ToArray();
                     message.Envelope.ReplyWith(
                         new ClientMessage.ReadStreamEventsBackwardCompleted(
                             message.CorrelationId, message.EventStreamId,
                             message.FromEventNumber == -1
                                 ? (EnumerableExtensions.IsEmpty(list) ? -1 : list.Last().EventNumber)
-                                : message.FromEventNumber, message.MaxCount, ReadStreamResult.Success, records,
+                                : message.FromEventNumber, message.MaxCount, ReadStreamResult.Success, records, null, false,
                             string.Empty,
                             nextEventNumber: records.Length > 0 ? records.Last().Event.EventNumber - 1 : -1,
                             lastEventNumber: list.Safe().Any() ? list.Safe().Last().EventNumber : -1,
@@ -258,7 +258,7 @@ namespace EventStore.Core.Tests.Helpers
                         message.Envelope.ReplyWith(
                             new ClientMessage.ReadStreamEventsBackwardCompleted(
                                 message.CorrelationId, message.EventStreamId, message.FromEventNumber, message.MaxCount,
-                                ReadStreamResult.NoStream, new ResolvedEvent[0], "", nextEventNumber: -1, lastEventNumber: -1,
+                                ReadStreamResult.NoStream, new ResolvedEvent[0], null, false, "", nextEventNumber: -1, lastEventNumber: -1,
                                 isEndOfStream: true, 
                                 lastCommitPosition: _fakePosition));
                         return;
@@ -289,7 +289,7 @@ namespace EventStore.Core.Tests.Helpers
                 message.Envelope.ReplyWith(
                     new ClientMessage.ReadStreamEventsBackwardCompleted(
                         message.CorrelationId, message.EventStreamId, message.FromEventNumber, message.MaxCount,
-                        ReadStreamResult.StreamDeleted, new ResolvedEvent[0], string.Empty, -1, -1, true, _fakePosition));
+                        ReadStreamResult.StreamDeleted, new ResolvedEvent[0], null, false, string.Empty, -1, -1, true, _fakePosition));
                             
             }
             else if (_lastMessageReplies.TryGetValue(message.EventStreamId, out list) || _noOtherStreams)
@@ -300,13 +300,13 @@ namespace EventStore.Core.Tests.Helpers
                         list.Safe()
                             .SkipWhile(v => v.EventNumber < message.FromEventNumber)
                             .Take(message.MaxCount)
-                            .Select(v => BuildEvent(v, message.ResolveLinks))
+                            .Select(v => BuildEvent(v, message.ResolveLinkTos))
                             .ToArray();
                     var lastEventNumber = list.Safe().Any() ? list.Safe().Last().EventNumber : -1;
                     message.Envelope.ReplyWith(
                         new ClientMessage.ReadStreamEventsForwardCompleted(
                             message.CorrelationId, message.EventStreamId,
-                            message.FromEventNumber, message.MaxCount, ReadStreamResult.Success, records,
+                            message.FromEventNumber, message.MaxCount, ReadStreamResult.Success, records, null, false,
                             string.Empty,
                             nextEventNumber: records.Length > 0 ? records.Last().Event.EventNumber + 1 : lastEventNumber + 1,
                             lastEventNumber: lastEventNumber,
@@ -320,7 +320,7 @@ namespace EventStore.Core.Tests.Helpers
                         message.Envelope.ReplyWith(
                             new ClientMessage.ReadStreamEventsForwardCompleted(
                                 message.CorrelationId, message.EventStreamId, message.FromEventNumber, message.MaxCount,
-                                ReadStreamResult.NoStream, new ResolvedEvent[0], "", nextEventNumber: -1, lastEventNumber: -1,
+                                ReadStreamResult.NoStream, new ResolvedEvent[0], null, false, "", nextEventNumber: -1, lastEventNumber: -1,
                                 isEndOfStream: true, 
                                 lastCommitPosition: _fakePosition));
                         return;
@@ -469,12 +469,12 @@ namespace EventStore.Core.Tests.Helpers
             {
                 pos = record.Key;
                 next = new TFPos(pos.CommitPosition, pos.PreparePosition + 1);
-                list.Add(BuildEvent(record.Value, message.ResolveLinks, record.Key.CommitPosition));
+                list.Add(BuildEvent(record.Value, message.ResolveLinkTos, record.Key.CommitPosition));
             }
             var events = list.ToArray();
             message.Envelope.ReplyWith(
                 new ClientMessage.ReadAllEventsForwardCompleted(
-                    message.CorrelationId, ReadAllResult.Success, "", events, message.MaxCount, pos, next, prev,
+                    message.CorrelationId, ReadAllResult.Success, "", events, null, false, message.MaxCount, pos, next, prev,
                     _fakePosition));
         }
 

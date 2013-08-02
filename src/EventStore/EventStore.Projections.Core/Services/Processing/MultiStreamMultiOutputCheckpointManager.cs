@@ -126,10 +126,11 @@ namespace EventStore.Projections.Core.Services.Processing
         private void BeginLoadPrerecordedEventsChunk(CheckpointTag checkpointTag, int fromEventNumber)
         {
             _loadingPrerecordedEventsFrom = checkpointTag;
+            var corrId = Guid.NewGuid();
             _readDispatcher.Publish(
                 new ClientMessage.ReadStreamEventsBackward(
-                    Guid.NewGuid(), _readDispatcher.Envelope, _namingBuilder.GetOrderStreamName(), fromEventNumber, 100,
-                    resolveLinks: false, validationStreamVersion: null, user: SystemAccount.Principal), 
+                    corrId, corrId, _readDispatcher.Envelope, _namingBuilder.GetOrderStreamName(), fromEventNumber, 100,
+                    resolveLinkTos: false, requireMaster: false, validationStreamVersion: null, user: SystemAccount.Principal), 
                     completed =>
                         {
                             switch (completed.Result)
@@ -194,9 +195,10 @@ namespace EventStore.Projections.Core.Services.Processing
             string streamId = parts[1];
 
 
+            var corrId = Guid.NewGuid();
             _readDispatcher.Publish(
                 new ClientMessage.ReadStreamEventsBackward(
-                    Guid.NewGuid(), _readDispatcher.Envelope, streamId, eventNumber, 1, true, null, SystemAccount.Principal),
+                    corrId, corrId, _readDispatcher.Envelope, streamId, eventNumber, 1, true, false, null, SystemAccount.Principal),
                     completed =>
                         {
                             switch (completed.Result)

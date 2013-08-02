@@ -26,7 +26,6 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 using System;
-using System.Net;
 
 namespace EventStore.ClientAPI.Messages
 {
@@ -48,6 +47,8 @@ namespace EventStore.ClientAPI.Messages
 
         public class MemberInfoDto
         {
+            public Guid InstanceId { get; set; }
+
             public DateTime TimeStamp { get; set; }
             public VNodeState State { get; set; }
             public bool IsAlive { get; set; }
@@ -66,6 +67,7 @@ namespace EventStore.ClientAPI.Messages
             public string ExternalHttpIp { get; set; }
             public int ExternalHttpPort { get; set; }
         
+            public long LastCommitPosition { get; set; }
             public long WriterCheckpoint { get; set; }
             public long ChaserCheckpoint { get; set; }
         
@@ -76,21 +78,19 @@ namespace EventStore.ClientAPI.Messages
             public override string ToString()
             {
                 if (State == VNodeState.Manager)
-                    return string.Format("MAN <{0}> [{1}:{2}, {3}:{4}] | {5}",
-                                         IsAlive ? "LIVE" : "DEAD",
+                    return string.Format("MAN {0:B} <{1}> [{2}, {3}:{4}, {5}:{6}] | {7:yyyy-MM-dd HH:mm:ss.fff}",
+                                         InstanceId, IsAlive ? "LIVE" : "DEAD", State,
                                          InternalHttpIp, InternalHttpPort,
                                          ExternalHttpIp, ExternalHttpPort,
                                          TimeStamp);
-                return string.Format("VND <{0}> [{1}, {2}:{3}, {4}, {5}:{6}, {7}, {8}:{9}, {10}:{11}] {12}/{13}/E{14}@{15}:{16:B} | {17}",
-                                     IsAlive ? "LIVE" : "DEAD",
-                                     State,
+                return string.Format("VND {0:B} <{1}> [{2}, {3}:{4}, {5}, {6}:{7}, {8}, {9}:{10}, {11}:{12}] {13}/{14}/{15}/E{16}@{17}:{18:B} | {19:yyyy-MM-dd HH:mm:ss.fff}",
+                                     InstanceId, IsAlive ? "LIVE" : "DEAD", State,
                                      InternalTcpIp, InternalTcpPort,
                                      InternalSecureTcpPort > 0 ? string.Format("{0}:{1}", InternalTcpIp, InternalSecureTcpPort) : "n/a",
                                      ExternalTcpIp, ExternalTcpPort,
                                      ExternalSecureTcpPort > 0 ? string.Format("{0}:{1}", ExternalTcpIp, ExternalSecureTcpPort) : "n/a",
-                                     InternalHttpIp, InternalHttpPort,
-                                     ExternalHttpIp, ExternalHttpPort,
-                                     WriterCheckpoint, ChaserCheckpoint,
+                                     InternalHttpIp, InternalHttpPort, ExternalHttpIp, ExternalHttpPort,
+                                     LastCommitPosition, WriterCheckpoint, ChaserCheckpoint,
                                      EpochNumber, EpochPosition, EpochId,
                                      TimeStamp);
             }

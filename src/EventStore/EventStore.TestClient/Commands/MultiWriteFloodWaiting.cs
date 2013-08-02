@@ -130,10 +130,10 @@ namespace EventStore.TestClient.Commands
                             Enumerable.Range(0, writeCnt).Select(x => 
                                 new TcpClientMessageDto.NewEvent(Guid.NewGuid().ToByteArray(),
                                                                  "type",
-                                                                 false,
+                                                                 0,0,
                                                                  Common.Utils.Helper.UTF8NoBom.GetBytes(data),
                                                                  new byte[0])).ToArray(),
-                            true);
+                            false);
                         var package = new TcpPackage(TcpCommand.WriteEvents, Guid.NewGuid(), writeDto.Serialize());
                         client.EnqueueSend(package.AsByteArray());
                         localDoneEvent.WaitOne();

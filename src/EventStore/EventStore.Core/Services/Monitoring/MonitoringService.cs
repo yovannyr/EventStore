@@ -32,7 +32,6 @@ using System.Threading;
 using EventStore.Common.Log;
 using EventStore.Common.Utils;
 using EventStore.Core.Bus;
-using EventStore.Core.Cluster;
 using EventStore.Core.Data;
 using EventStore.Core.Messages;
 using EventStore.Core.Messaging;
@@ -62,15 +61,17 @@ namespace EventStore.Core.Services.Monitoring
         private static readonly ILogger Log = LogManager.GetLoggerFor<MonitoringService>();
 
         private static readonly string StreamMetadata = string.Format("{{\"$maxAge\":{0}}}", (int)TimeSpan.FromDays(10).TotalSeconds);
-        private static readonly TimeSpan MemoizePeriod = TimeSpan.FromSeconds(1);
+        public static readonly TimeSpan MemoizePeriod = TimeSpan.FromSeconds(1);
         private static readonly IEnvelope NoopEnvelope = new NoopEnvelope();
 
         private readonly IPublisher _monitoringBus;
         private readonly IPublisher _statsCollectionBus;
         private readonly IPublisher _mainBus;
+        private readonly ICheckpoint _writerCheckpoint;
+        private readonly string _dbPath;
         private readonly StatsStorage _statsStorage;
         private readonly long _statsCollectionPeriodMs;
-        private readonly SystemStatsHelper _systemStats;
+        private SystemStatsHelper _systemStats;
 
         private string _lastWrittenCsvHeader;
         private DateTime _lastStatsRequestTime = DateTime.UtcNow;
@@ -99,15 +100,17 @@ namespace EventStore.Core.Services.Monitoring
             _monitoringBus = monitoringBus;
             _statsCollectionBus = statsCollectionBus;
             _mainBus = mainBus;
+            _writerCheckpoint = writerCheckpoint;
+            _dbPath = dbPath;
             _statsStorage = statsStorage;
             _statsCollectionPeriodMs = statsCollectionPeriod > TimeSpan.Zero ? (long)statsCollectionPeriod.TotalMilliseconds : Timeout.Infinite;
-            _systemStats = new SystemStatsHelper(Log, writerCheckpoint, dbPath);
             _nodeStatsStream = string.Format("{0}-{1}", SystemStreams.StatsStreamPrefix, nodeEndpoint);
             _timer = new Timer(OnTimerTick, null, Timeout.Infinite, Timeout.Infinite);
         }
 
         public void Handle(SystemMessage.SystemInit message)
         {
+            _systemStats = new SystemStatsHelper(Log, _writerCheckpoint, _dbPath);
             _timer.Change(_statsCollectionPeriodMs, Timeout.Infinite);
         }
 
@@ -177,8 +180,9 @@ namespace EventStore.Core.Services.Monitoring
         {
             var data = rawStats.ToJsonBytes();
             var evnt = new Event(Guid.NewGuid(), SystemEventTypes.StatsCollection, true, data, null);
-            var msg = new ClientMessage.WriteEvents(Guid.NewGuid(), NoopEnvelope,  true, _nodeStatsStream, 
-                                                    ExpectedVersion.Any, evnt, SystemAccount.Principal);
+            var corrId = Guid.NewGuid();
+            var msg = new ClientMessage.WriteEvents(corrId, corrId, NoopEnvelope, false, _nodeStatsStream, 
+                                                    ExpectedVersion.Any, new[]{evnt}, SystemAccount.Principal);
             _mainBus.Publish(msg);
         }
 
@@ -207,13 +211,12 @@ namespace EventStore.Core.Services.Monitoring
         {
             var metadata = Helper.UTF8NoBom.GetBytes(StreamMetadata);
             _streamMetadataWriteCorrId = Guid.NewGuid();
-            _mainBus.Publish(new ClientMessage.WriteEvents(_streamMetadataWriteCorrId,
-                                                           new PublishEnvelope(_monitoringBus),
-                                                           true,
-                                                           SystemStreams.MetastreamOf(_nodeStatsStream),
-                                                           -1,
-                                                           new Event(Guid.NewGuid(), "$stats-metadata", true, metadata, null),
-                                                           SystemAccount.Principal));
+            _mainBus.Publish(
+                new ClientMessage.WriteEvents(
+                    _streamMetadataWriteCorrId, _streamMetadataWriteCorrId, new PublishEnvelope(_monitoringBus),
+                    false, SystemStreams.MetastreamOf(_nodeStatsStream), ExpectedVersion.NoStream,
+                    new[]{new Event(Guid.NewGuid(), SystemEventTypes.StreamMetadata, true, metadata, null)},
+                    SystemAccount.Principal));
         }
 
         public void Handle(ClientMessage.WriteEventsCompleted message)
@@ -237,9 +240,13 @@ namespace EventStore.Core.Services.Monitoring
                     SetStatsStreamMetadata();
                     break;
                 }
+                case OperationResult.AccessDenied:
+                {
+                    // can't do anything about that right now
+                    break;
+                }
                 case OperationResult.StreamDeleted:
                 case OperationResult.InvalidTransaction: // should not happen at all
-                case OperationResult.AccessDenied: // should not happen at all
                 {
                     Log.Error("Monitoring service got unexpected response code when trying to create stats stream ({0}).", message.Result);
                     break;

@@ -35,6 +35,7 @@ using EventStore.Core.Messaging;
 using EventStore.Core.Services.TimerService;
 using EventStore.Core.Services.Transport.Http;
 using EventStore.Core.TransactionLog.Chunks;
+using EventStore.Core.Util;
 using EventStore.Projections.Core.Messages;
 using EventStore.Projections.Core.Messages.EventReaders.Feeds;
 using EventStore.Projections.Core.Messaging;
@@ -46,20 +47,23 @@ namespace EventStore.Projections.Core
     {
         private Projections _projections;
         private readonly int _projectionWorkerThreadCount;
-        private readonly bool _runProjections;
+        private readonly RunProjections _runProjections;
 
-        public ProjectionsSubsystem(int projectionWorkerThreadCount, bool runProjections)
+        public ProjectionsSubsystem(int projectionWorkerThreadCount, RunProjections runProjections)
         {
-            _projectionWorkerThreadCount = projectionWorkerThreadCount;
+            if (runProjections <= RunProjections.System)
+                _projectionWorkerThreadCount = 1;
+            else
+                _projectionWorkerThreadCount = projectionWorkerThreadCount;
             _runProjections = runProjections;
         }
 
         public void Register(
             TFChunkDb db, QueuedHandler mainQueue, ISubscriber mainBus, TimerService timerService,
-            ITimeProvider timeProvider, HttpService[] httpServices, IPublisher networkSendService)
+            ITimeProvider timeProvider, IHttpForwarder httpForwarder, HttpService[] httpServices, IPublisher networkSendService)
         {
             _projections = new EventStore.Projections.Core.Projections(
-                db, mainQueue, mainBus, timerService, timeProvider, httpServices, networkSendService,
+                db, mainQueue, mainBus, timerService, timeProvider, httpForwarder, httpServices, networkSendService,
                 projectionWorkerThreadCount: _projectionWorkerThreadCount, runProjections: _runProjections);
         }
 
@@ -86,16 +90,19 @@ namespace EventStore.Projections.Core
 
         public Projections(
             TFChunkDb db, QueuedHandler mainQueue, ISubscriber mainBus, TimerService timerService, ITimeProvider timeProvider,
-            HttpService[] httpServices, IPublisher networkSendQueue, int projectionWorkerThreadCount, bool runProjections)
+            IHttpForwarder httpForwarder, HttpService[] httpServices, IPublisher networkSendQueue,
+            int projectionWorkerThreadCount, RunProjections runProjections)
         {
             _projectionWorkerThreadCount = projectionWorkerThreadCount;
-            SetupMessaging(db, mainQueue, mainBus, timerService, timeProvider, httpServices, networkSendQueue, runProjections);
+            SetupMessaging(
+                db, mainQueue, mainBus, timerService, timeProvider, httpForwarder, httpServices, networkSendQueue,
+                runProjections);
 
         }
 
         private void SetupMessaging(
             TFChunkDb db, QueuedHandler mainQueue, ISubscriber mainBus, TimerService timerService, ITimeProvider timeProvider,
-            HttpService[] httpServices, IPublisher networkSendQueue, bool runProjections)
+            IHttpForwarder httpForwarder, HttpService[] httpServices, IPublisher networkSendQueue, RunProjections runProjections)
         {
             _coreQueues = new List<QueuedHandler>();
             _managerInputBus = new InMemoryBus("manager input bus");
@@ -119,7 +126,7 @@ namespace EventStore.Projections.Core
                 projectionNode.CoreOutput.Subscribe<ClientMessage.WriteEvents>(forwarder);
 
 
-                if (runProjections)
+                if (runProjections >= RunProjections.System)
                 {
                     projectionNode.CoreOutput.Subscribe(
                         Forwarder.Create<CoreProjectionManagementMessage.StateReport>(_managerInputQueue));
@@ -151,8 +158,8 @@ namespace EventStore.Projections.Core
             Forwarder.CreateBalancing<FeedReaderMessage.ReadPage>(_coreQueues.Cast<IPublisher>().ToArray()));
 
             _projectionManagerNode = ProjectionManagerNode.Create(
-                db, _managerInputQueue, httpServices, networkSendQueue, _coreQueues.Cast<IPublisher>().ToArray(),
-                runProjections);
+                db, _managerInputQueue, httpForwarder, httpServices, networkSendQueue,
+                _coreQueues.Cast<IPublisher>().ToArray(), runProjections);
             _projectionManagerNode.SetupMessaging(_managerInputBus);
             {
                 var forwarder = new RequestResponseQueueForwarder(

@@ -28,14 +28,10 @@
 
 namespace EventStore.ClientAPI.Common
 {
-    public static class SystemHeader
-    {
-        public const string ExpectedVersion = "X-ES-ExpectedVersion";
-    }
-
     public static class SystemStreams
     {
         public const string StreamsStream = "$streams";
+        public const string SettingsStream = "$settings";
         public const string StatsStreamPrefix = "$stats";
 
         public static string MetastreamOf(string streamId)
@@ -63,8 +59,12 @@ namespace EventStore.ClientAPI.Common
         public const string Acl = "$acl";
         public const string AclRead = "$r";
         public const string AclWrite = "$w";
+        public const string AclDelete = "$d";
         public const string AclMetaRead = "$mr";
         public const string AclMetaWrite = "$mw";
+
+        public const string UserStreamAcl = "$userStreamAcl";
+        public const string SystemStreamAcl = "$systemStreamAcl";
     }
 
     public static class SystemEventTypes
@@ -73,5 +73,6 @@ namespace EventStore.ClientAPI.Common
         public const string StatsCollection = "$statsCollected";
         public const string LinkTo = "$>";
         public const string StreamMetadata = "$metadata";
+        public const string Settings = "$settings";
     }
 }

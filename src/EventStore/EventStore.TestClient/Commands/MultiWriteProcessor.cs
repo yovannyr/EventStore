@@ -65,16 +65,16 @@ namespace EventStore.TestClient.Commands
                 context,
                 connectionEstablished: conn =>
                 {
-                    context.Log.Info("[{0}]: Writing...", conn.EffectiveEndPoint);
+                    context.Log.Info("[{0}, L{1}]: Writing...", conn.RemoteEndPoint, conn.LocalEndPoint);
                     var writeDto = new TcpClientMessageDto.WriteEvents(
                         eventStreamId,
                         expectedVersion,
                         Enumerable.Range(0, writeCount).Select(x => new TcpClientMessageDto.NewEvent(Guid.NewGuid().ToByteArray(),
                                                                                                      "type",
-                                                                                                     false,
+                                                                                                     0,0,
                                                                                                      Helper.UTF8NoBom.GetBytes(data),
                                                                                                      new byte[0])).ToArray(),
-                        true);
+                        false);
                     var package = new TcpPackage(TcpCommand.WriteEvents, Guid.NewGuid(), writeDto.Serialize()).AsByteArray();
                     sw.Start();
                     conn.EnqueueSend(package);

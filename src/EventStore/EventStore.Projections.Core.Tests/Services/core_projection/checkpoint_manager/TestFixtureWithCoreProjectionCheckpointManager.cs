@@ -64,7 +64,7 @@ namespace EventStore.Projections.Core.Tests.Services.core_projection.checkpoint_
             When();
         }
 
-        protected virtual void When()
+        protected new virtual void When()
         {
             _manager = new DefaultCheckpointManager(
                 _bus, _projectionCorrelationId, new ProjectionVersion(1, 0, 0), null, _readDispatcher, _writeDispatcher,
@@ -87,6 +87,7 @@ namespace EventStore.Projections.Core.Tests.Services.core_projection.checkpoint_
             _bus.Subscribe<EventReaderSubscriptionMessage.CheckpointSuggested>(_projection);
             _bus.Subscribe<EventReaderSubscriptionMessage.EofReached>(_projection);
             _bus.Subscribe<EventReaderSubscriptionMessage.ProgressChanged>(_projection);
+            _bus.Subscribe<EventReaderSubscriptionMessage.NotAuthorized>(_projection);
             _checkpointHandledThreshold = 2;
             _checkpointUnhandledBytesThreshold = 5;
             _pendingEventsThreshold = 5;

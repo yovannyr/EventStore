@@ -86,16 +86,17 @@ namespace EventStore.Projections.Core.Tests.Services.core_projection
             _bus.Subscribe<EventReaderSubscriptionMessage.CheckpointSuggested>(_coreProjection);
             _bus.Subscribe<EventReaderSubscriptionMessage.EofReached>(_coreProjection);
             _bus.Subscribe<EventReaderSubscriptionMessage.ProgressChanged>(_coreProjection);
+            _bus.Subscribe<EventReaderSubscriptionMessage.NotAuthorized>(_coreProjection);
             _bus.Subscribe(new AdHocHandler<ProjectionCoreServiceMessage.CoreTick>(tick => tick.Action()));
             _bus.Subscribe(new AdHocHandler<ReaderCoreServiceMessage.ReaderTick>(tick => tick.Action()));
             PreWhen();
             When();
         }
 
-        protected virtual void PreWhen()
+        protected new virtual void PreWhen()
         {
         }
 
-        protected abstract void When();
+        protected new abstract void When();
     }
 }

@@ -56,7 +56,7 @@ namespace EventStore.Core.Util
         {
             var pattern = _localWebRootPath + "/{*remaining_path}";
             _logger.Trace("Binding MiniWeb to {0}", pattern);
-            service.RegisterControllerAction(new ControllerAction(pattern,
+            service.RegisterAction(new ControllerAction(pattern,
                                                                   HttpMethod.Get,
                                                                   Codec.NoCodecs,
                                                                   new ICodec[] { Codec.ManualEncoding }),
@@ -126,16 +126,21 @@ namespace EventStore.Core.Util
 
         private static ResponseConfiguration GetWebPageConfig(string contentType)
         {
+            var encoding = contentType.StartsWith("image") ? null : Helper.UTF8NoBom;
+            int? cacheSeconds =
 #if RELEASE || CACHE_WEB_CONTENT
-            return Configure.OkCache(contentType, 60 * 60); //1 hour
+                60*60; // 1 hour
 #else
-            return Configure.OkNoCache(contentType, contentType.StartsWith("image") ? null : Helper.UTF8NoBom);
+                null; // no caching
 #endif
+// ReSharper disable ExpressionIsAlwaysNull
+            return Configure.Ok(contentType, encoding, null, cacheSeconds, isCachePublic: true);
+// ReSharper restore ExpressionIsAlwaysNull
         }
 
         public static string GetWebRootFileSystemDirectory(string debugPath = null)
         {
-            string fileSystemWebRoot = null;
+            string fileSystemWebRoot;
             try
             {
                 if (!string.IsNullOrEmpty(debugPath))

@@ -31,7 +31,7 @@ using System.Net;
 using EventStore.Common.Log;
 using EventStore.Common.Utils;
 using EventStore.Core.Bus;
-using EventStore.Core.Cluster;
+using EventStore.Core.Data;
 using EventStore.Core.Messages;
 using EventStore.Core.Messaging;
 using EventStore.Core.Services.TimerService;
@@ -177,7 +177,7 @@ namespace EventStore.Core.Services.VNode
 
         private void Handle(SystemMessage.BecomePreMaster message)
         {
-            Log.Info("========== [{0}] PRE-MASTER STATE, WAITING FOR CHASER To CATCH UP...", _httpEndPoint);
+            Log.Info("========== [{0}] PRE-MASTER STATE, WAITING FOR CHASER TO CATCH UP...", _httpEndPoint);
             _state = VNodeState.PreMaster;
             _mainQueue.Publish(new SystemMessage.WaitForChaserToCatchUp(Guid.NewGuid(), TimeSpan.Zero));
             _outputBus.Publish(message);

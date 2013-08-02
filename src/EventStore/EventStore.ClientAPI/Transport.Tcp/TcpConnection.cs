@@ -31,7 +31,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
-using System.Reflection;
 using System.Threading;
 using EventStore.ClientAPI.Common;
 using EventStore.ClientAPI.Common.Utils;
@@ -42,20 +41,21 @@ namespace EventStore.ClientAPI.Transport.Tcp
     {
         internal const int MaxSendPacketSize = 64 * 1024;
 
-        private static readonly SocketArgsPool SocketArgsPool = new SocketArgsPool("TcpConnection.SocketArgsPool", 
-                                                                                   TcpConfiguration.SendReceivePoolSize, 
-                                                                                   () => new SocketAsyncEventArgs());
+        internal static readonly SocketArgsPool SocketArgsPool = new SocketArgsPool("TcpConnection.SocketArgsPool", 
+                                                                                    TcpConfiguration.SendReceivePoolSize, 
+                                                                                    () => new SocketAsyncEventArgs());
 
         internal static ITcpConnection CreateConnectingConnection(ILogger log,
                                                                   Guid connectionId, 
                                                                   IPEndPoint remoteEndPoint,
                                                                   TcpClientConnector connector,
+                                                                  TimeSpan connectionTimeout,
                                                                   Action<ITcpConnection> onConnectionEstablished,
                                                                   Action<ITcpConnection, SocketError> onConnectionFailed,
                                                                   Action<ITcpConnection, SocketError> onConnectionClosed)
         {
             var connection = new TcpConnection(log, connectionId, remoteEndPoint, onConnectionClosed);
-            // ReSharper disable ImplicitlyCapturedClosure
+// ReSharper disable ImplicitlyCapturedClosure
             connector.InitConnect(remoteEndPoint,
                                   (_, socket) =>
                                   {
@@ -67,17 +67,15 @@ namespace EventStore.ClientAPI.Transport.Tcp
                                   {
                                       if (onConnectionFailed != null)
                                           onConnectionFailed(connection, socketError);
-                                  });
-            // ReSharper restore ImplicitlyCapturedClosure
+                                  }, connection, connectionTimeout);
+// ReSharper restore ImplicitlyCapturedClosure
             return connection;
         }
 
         public Guid ConnectionId { get { return _connectionId; } }
-        public IPEndPoint EffectiveEndPoint { get { return _effectiveEndPoint; } }
         public int SendQueueSize { get { return _sendQueue.Count; } }
 
         private readonly Guid _connectionId;
-        private readonly IPEndPoint _effectiveEndPoint;
         private readonly ILogger _log;
 
         private Socket _socket;
@@ -96,22 +94,21 @@ namespace EventStore.ClientAPI.Transport.Tcp
         private Action<ITcpConnection, IEnumerable<ArraySegment<byte>>> _receiveCallback;
         private readonly Action<ITcpConnection, SocketError> _onConnectionClosed;
 
-        private TcpConnection(ILogger log, Guid connectionId, IPEndPoint effectiveEndPoint, Action<ITcpConnection, SocketError> onConnectionClosed)
+        private TcpConnection(ILogger log, Guid connectionId, IPEndPoint remoteEndPoint, Action<ITcpConnection, SocketError> onConnectionClosed)
+            : base(remoteEndPoint)
         {
             Ensure.NotNull(log, "log");
             Ensure.NotEmptyGuid(connectionId, "connectionId");
-            Ensure.NotNull(effectiveEndPoint, "effectiveEndPoint");
 
             _connectionId = connectionId;
-            _effectiveEndPoint = effectiveEndPoint;
             _log = log;
             _onConnectionClosed = onConnectionClosed;
         }
 
         private void InitSocket(Socket socket)
         {
-            //_log.Info("TcpConnection::InitSocket[{0}]", socket.RemoteEndPoint);
-            InitSocket(socket, _effectiveEndPoint);
+            InitConnectionBase(socket);
+            //_log.Info("TcpConnection::InitSocket[{0}, L{1}]", RemoteEndPoint, LocalEndPoint);
             using (_sendingLock.Acquire())
             {
                 _socket = socket;
@@ -206,14 +203,16 @@ namespace EventStore.ClientAPI.Transport.Tcp
             else
             {
                 NotifySendCompleted(socketArgs.Count);
-                using (_sendingLock.Acquire())
-                {
-                    _isSending = false;
-                }
                 if (_closed != 0)
                     ReturnSendingSocketArgs();
                 else
+                {
+                    using (_sendingLock.Acquire())
+                    {
+                        _isSending = false;
+                    }
                     TrySend();
+                }
             }
         }
 
@@ -330,9 +329,9 @@ namespace EventStore.ClientAPI.Transport.Tcp
 
             NotifyClosed();
 
-            _log.Info("[{0:HH:mm:ss.fff}: {1}]:\nConnection ID: {2:B}\nReceived bytes: {3}, Sent bytes: {4}\n"
-                      + "Send calls: {5}, callbacks: {6}\nReceive calls: {7}, callbacks: {8}\nClose reason: [{9}] {10}\n",
-                      DateTime.UtcNow, EffectiveEndPoint, _connectionId,
+            _log.Info("[{0:HH:mm:ss.fff}: N{1}, L{2}, {3:B}]:\nReceived bytes: {4}, Sent bytes: {5}\n"
+                      + "Send calls: {6}, callbacks: {7}\nReceive calls: {8}, callbacks: {9}\nClose reason: [{10}] {11}\n",
+                      DateTime.UtcNow, RemoteEndPoint, LocalEndPoint, _connectionId,
                       TotalBytesReceived, TotalBytesSent,
                       SendCalls, SendCallbacks,
                       ReceiveCalls, ReceiveCallbacks,
@@ -364,7 +363,7 @@ namespace EventStore.ClientAPI.Transport.Tcp
                 socketArgs.AcceptSocket = null;
                 if (socketArgs.Buffer != null)
                     socketArgs.SetBuffer(null, 0, 0);
-                //SocketArgsPool.Return(socketArgs);
+                SocketArgsPool.Return(socketArgs);
             }
         }
 
@@ -377,13 +376,13 @@ namespace EventStore.ClientAPI.Transport.Tcp
                 socketArgs.AcceptSocket = null;
                 if (socketArgs.Buffer != null)
                     socketArgs.SetBuffer(null, 0, 0);
-                //SocketArgsPool.Return(socketArgs);
+                SocketArgsPool.Return(socketArgs);
             }
         }
 
         public override string ToString()
         {
-            return EffectiveEndPoint.ToString();
+            return RemoteEndPoint.ToString();
         }
     }
 }

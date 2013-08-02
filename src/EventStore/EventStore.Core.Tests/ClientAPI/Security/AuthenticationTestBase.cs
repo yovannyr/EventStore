@@ -31,6 +31,7 @@ using EventStore.ClientAPI;
 using EventStore.ClientAPI.SystemData;
 using EventStore.Core.Messages;
 using EventStore.Core.Messaging;
+using EventStore.Core.Services;
 using EventStore.Core.Services.UserManagement;
 using EventStore.Core.Tests.ClientAPI.Helpers;
 using EventStore.Core.Tests.Helpers;
@@ -53,7 +54,7 @@ namespace EventStore.Core.Tests.ClientAPI.Security
         public override void TestFixtureSetUp()
         {
             base.TestFixtureSetUp();
-            _node = new MiniNode(PathName);
+            _node = new MiniNode(PathName, enableTrustedAuth: true);
             _node.Start();
 
             var userCreateEvent1 = new ManualResetEventSlim();
@@ -82,25 +83,59 @@ namespace EventStore.Core.Tests.ClientAPI.Security
                                 userCreateEvent2.Set();
                             }), SystemAccount.Principal, "user2", "Test User 2", new string[0], "pa$$2"));
 
-            Assert.IsTrue(userCreateEvent1.Wait(5000), "User 1 creation failed");
-            Assert.IsTrue(userCreateEvent2.Wait(5000), "User 2 creation failed");
+            var adminCreateEvent2 = new ManualResetEventSlim();
+            _node.Node.MainQueue.Publish(
+                new UserManagementMessage.Create(
+                    new CallbackEnvelope(
+                        m =>
+                        {
+                            Assert.IsTrue(m is UserManagementMessage.UpdateResult);
+                            var msg = (UserManagementMessage.UpdateResult)m;
+                            Assert.IsTrue(msg.Success);
+
+                            adminCreateEvent2.Set();
+                        }), SystemAccount.Principal, "adm", "Administrator User", new[] { SystemRoles.Admins}, "admpa$$"));
+
+            Assert.IsTrue(userCreateEvent1.Wait(120000), "User 1 creation failed");
+            Assert.IsTrue(userCreateEvent2.Wait(120000), "User 2 creation failed");
+            Assert.IsTrue(adminCreateEvent2.Wait(120000), "Administrator User creation failed");
 
             Connection = TestConnection.Create(_node.TcpEndPoint, TcpType.Normal, _userCredentials);
             Connection.Connect();
 
-            Connection.SetStreamMetadata("noacl-stream", ExpectedVersion.NoStream, Guid.NewGuid(),
-                                         StreamMetadata.Build());
-            Connection.SetStreamMetadata("read-stream", ExpectedVersion.NoStream, Guid.NewGuid(), 
-                                         StreamMetadata.Build().SetReadRole("user1"));
-            Connection.SetStreamMetadata("write-stream", ExpectedVersion.NoStream, Guid.NewGuid(),
-                                         StreamMetadata.Build().SetWriteRole("user1"));
-            Connection.SetStreamMetadata("metaread-stream", ExpectedVersion.NoStream, Guid.NewGuid(),
-                                         StreamMetadata.Build().SetMetadataReadRole("user1"));
-            Connection.SetStreamMetadata("metawrite-stream", ExpectedVersion.NoStream, Guid.NewGuid(),
-                                         StreamMetadata.Build().SetMetadataWriteRole("user1"));
+            Connection.SetStreamMetadata("noacl-stream", ExpectedVersion.NoStream, StreamMetadata.Build());
+            Connection.SetStreamMetadata("read-stream", ExpectedVersion.NoStream, StreamMetadata.Build().SetReadRole("user1"));
+            Connection.SetStreamMetadata("write-stream", ExpectedVersion.NoStream, StreamMetadata.Build().SetWriteRole("user1"));
+            Connection.SetStreamMetadata("metaread-stream", ExpectedVersion.NoStream, StreamMetadata.Build().SetMetadataReadRole("user1"));
+            Connection.SetStreamMetadata("metawrite-stream", ExpectedVersion.NoStream, StreamMetadata.Build().SetMetadataWriteRole("user1"));
 
-            Connection.SetStreamMetadata("$all", ExpectedVersion.Any, Guid.NewGuid(), 
-                                         StreamMetadata.Build().SetReadRole("user1"));
+            Connection.SetStreamMetadata("$all", ExpectedVersion.Any, StreamMetadata.Build().SetReadRole("user1"), new UserCredentials("adm", "admpa$$"));
+
+            Connection.SetStreamMetadata("$system-acl", ExpectedVersion.NoStream,
+                                         StreamMetadata.Build()
+                                                       .SetReadRole("user1")
+                                                       .SetWriteRole("user1")
+                                                       .SetMetadataReadRole("user1")
+                                                       .SetMetadataWriteRole("user1"), new UserCredentials("adm", "admpa$$"));
+            Connection.SetStreamMetadata("$system-adm", ExpectedVersion.NoStream,
+                                         StreamMetadata.Build()
+                                                       .SetReadRole(SystemRoles.Admins)
+                                                       .SetWriteRole(SystemRoles.Admins)
+                                                       .SetMetadataReadRole(SystemRoles.Admins)
+                                                       .SetMetadataWriteRole(SystemRoles.Admins), new UserCredentials("adm", "admpa$$"));
+
+            Connection.SetStreamMetadata("normal-all", ExpectedVersion.NoStream,
+                                         StreamMetadata.Build()
+                                                       .SetReadRole(SystemRoles.All)
+                                                       .SetWriteRole(SystemRoles.All)
+                                                       .SetMetadataReadRole(SystemRoles.All)
+                                                       .SetMetadataWriteRole(SystemRoles.All));
+            Connection.SetStreamMetadata("$system-all", ExpectedVersion.NoStream,
+                                         StreamMetadata.Build()
+                                                       .SetReadRole(SystemRoles.All)
+                                                       .SetWriteRole(SystemRoles.All)
+                                                       .SetMetadataReadRole(SystemRoles.All)
+                                                       .SetMetadataWriteRole(SystemRoles.All), new UserCredentials("adm", "admpa$$"));
         }
 
         [TestFixtureTearDown]
@@ -109,6 +144,12 @@ namespace EventStore.Core.Tests.ClientAPI.Security
             _node.Shutdown();
             Connection.Close();
             base.TestFixtureTearDown();
+        }
+
+        protected void ReadEvent(string streamId, string login, string password)
+        {
+            Connection.ReadEvent(streamId, -1, false,
+                                 login == null && password == null ? null : new UserCredentials(login, password));
         }
 
         protected void ReadStreamForward(string streamId, string login, string password)
@@ -152,46 +193,56 @@ namespace EventStore.Core.Tests.ClientAPI.Security
             Connection.GetStreamMetadataAsRawBytes(streamId, login == null && password == null ? null : new UserCredentials(login, password));
         }
 
-        protected void WriteMeta(string streamId, string login, string password)
+        protected void WriteMeta(string streamId, string login, string password, string metawriteRole)
         {
-            Connection.SetStreamMetadata(streamId,
-                                         ExpectedVersion.Any,
-                                         Guid.NewGuid(),
-                                         streamId == "metawrite-stream" ? StreamMetadata.Build().SetMetadataWriteRole("user1") : StreamMetadata.Build(),
+            Connection.SetStreamMetadata(streamId, ExpectedVersion.Any,
+                                         metawriteRole == null
+                                            ? StreamMetadata.Build()
+                                            : StreamMetadata.Build().SetReadRole(metawriteRole)
+                                                                    .SetWriteRole(metawriteRole)
+                                                                    .SetMetadataReadRole(metawriteRole)
+                                                                    .SetMetadataWriteRole(metawriteRole),
                                          login == null && password == null ? null : new UserCredentials(login, password));
         }
 
         protected void SubscribeToStream(string streamId, string login, string password)
         {
-            Connection.SubscribeToStream(streamId, false, (x, y) => { }, (x, y, z) => { },
-                                         login == null && password == null ? null : new UserCredentials(login, password));
+            using (Connection.SubscribeToStream(streamId, false, (x, y) => { }, (x, y, z) => { },
+                                                login == null && password == null ? null : new UserCredentials(login, password)))
+            {
+            }
         }
 
         protected void SubscribeToAll(string login, string password)
         {
-            Connection.SubscribeToAll(false, (x, y) => { }, (x, y, z) => { },
-                                      login == null && password == null ? null : new UserCredentials(login, password));
+            using (Connection.SubscribeToAll(false, (x, y) => { }, (x, y, z) => { },
+                                             login == null && password == null ? null : new UserCredentials(login, password)))
+            {
+            }
+        }
+
+        protected string CreateStreamWithMeta(StreamMetadata metadata, string streamPrefix = null)
+        {
+            var stream = (streamPrefix ?? string.Empty) + TestContext.CurrentContext.Test.Name;
+            Connection.SetStreamMetadata(stream, ExpectedVersion.NoStream,
+                                         metadata, new UserCredentials("adm", "admpa$$"));
+            return stream;
+        }
+
+        protected void DeleteStream(string streamId, string login, string password)
+        {
+            Connection.DeleteStream(streamId, ExpectedVersion.Any, 
+                                    login == null && password == null ? null : new UserCredentials(login, password));
         }
 
         protected void Expect<T>(Action action) where T : Exception
         {
-            Assert.That(() =>
-            {
-                try
-                {
-                    action();
-                }
-                catch (Exception exc)
-                {
-                    throw;
-                }
-            },
-                        Throws.Exception.InstanceOf<AggregateException>().With.InnerException.InstanceOf<T>());
+            Assert.That(() => action(), Throws.Exception.InstanceOf<AggregateException>().With.InnerException.InstanceOf<T>());
         }
 
         protected void ExpectNoException(Action action)
         {
-            Assert.That(() => action, Throws.Nothing);
+            Assert.That(() => action(), Throws.Nothing);
         }
 
         protected EventData[] CreateEvents()

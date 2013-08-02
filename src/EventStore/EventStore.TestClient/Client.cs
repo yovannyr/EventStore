@@ -187,27 +187,33 @@ namespace EventStore.TestClient
                                               bool failContextOnError = true,
                                               IPEndPoint tcpEndPoint = null)
         {
-            var connectionCreatedEvent = new AutoResetEvent(false);
+            var connectionCreatedEvent = new ManualResetEventSlim(false);
             Connection typedConnection = null;
 
             var connection = _connector.ConnectTo(
                 Guid.NewGuid(),
                 tcpEndPoint ?? TcpEndpoint,
+                TcpConnectionManager.ConnectionTimeout,
                 conn =>
                 {
-                    if (!InteractiveMode)
-                        Log.Info("Connected to [{0}].", conn.EffectiveEndPoint);
-                    if (connectionEstablished != null)
+                    // we execute callback on ThreadPool because on FreeBSD it can be called synchronously
+                    // causing deadlock
+                    ThreadPool.QueueUserWorkItem(_ => 
                     {
-                        connectionCreatedEvent.WaitOne(500);
-                        connectionEstablished(typedConnection);
-                    }
+                        if (!InteractiveMode)
+                            Log.Info("Connected to [{0}, L{1}].", conn.RemoteEndPoint, conn.LocalEndPoint);
+                        if (connectionEstablished != null)
+                        {
+                            if (!connectionCreatedEvent.Wait(10000))
+                                throw new Exception("TcpTypedConnection creation took too long!");
+                            connectionEstablished(typedConnection);
+                        }
+                    });
                 },
                 (conn, error) =>
                 {
-                    var message = string.Format("Connection to [{0}] failed. Error: {1}.",
-                                                conn.EffectiveEndPoint,
-                                                error);
+                    var message = string.Format("Connection to [{0}, L{1}] failed. Error: {2}.",
+                                                conn.RemoteEndPoint, conn.LocalEndPoint, error);
                     Log.Error(message);
 
                     if (connectionClosed != null)
@@ -224,8 +230,8 @@ namespace EventStore.TestClient
                 {
                     if (!InteractiveMode || error != SocketError.Success)
                     {
-                        Log.Info("Connection [{0}] was closed {1}",
-                                 conn.EffectiveEndPoint,
+                        Log.Info("Connection [{0}, L{1}] was closed {2}",
+                                 conn.RemoteEndPoint, conn.LocalEndPoint,
                                  error == SocketError.Success ? "cleanly." : "with error: " + error + ".");
                     }
 
@@ -258,8 +264,8 @@ namespace EventStore.TestClient
                     catch (Exception ex)
                     {
                         Log.InfoException(ex,
-                                          "[{0}] ERROR for {1}. Connection will be closed.",
-                                          conn.EffectiveEndPoint,
+                                          "[{0}, L{1}] ERROR for {2}. Connection will be closed.",
+                                          conn.RemoteEndPoint, conn.LocalEndPoint,
                                           validPackage ? package.Command as object : "<invalid package>");
                         conn.Close(ex.Message);
 

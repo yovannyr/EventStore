@@ -68,9 +68,6 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="..\EventStore.Common\Properties\AssemblyVersion.cs">
-      <Link>Properties\AssemblyVersion.cs</Link>
-    </Compile>
     <Compile Include="Bus\FSMSpeedTest.cs" />
     <Compile Include="Bus\Helpers\BusTestMessages.cs" />
     <Compile Include="Bus\Helpers\NoopConsumer.cs" />
@@ -91,8 +88,14 @@
     <Compile Include="Bus\when_unsubscribing_from_memory_bus.cs" />
     <Compile Include="ClientAPI\appending_to_implicitly_created_stream.cs" />
     <Compile Include="ClientAPI\appending_to_implicitly_created_stream_using_transaction.cs" />
-    <Compile Include="ClientAPI\append_to_stream.cs" />
+    <Compile Include="ClientAPI\Security\multiple_role_security.cs" />
+    <Compile Include="ClientAPI\Security\stream_security_inheritance.cs" />
+    <Compile Include="ClientAPI\Security\overriden_system_stream_security_for_all.cs" />
+    <Compile Include="ClientAPI\Security\overriden_user_stream_security.cs" />
+    <Compile Include="ClientAPI\Security\overriden_system_stream_security.cs" />
+    <Compile Include="ClientAPI\ssl_append_to_stream.cs" />
     <Compile Include="ClientAPI\connect.cs" />
+    <Compile Include="ClientAPI\read_event_should.cs" />
     <Compile Include="ClientAPI\deleting_stream.cs" />
     <Compile Include="ClientAPI\event_store_connection_should.cs" />
     <Compile Include="ClientAPI\Helpers\TcpType.cs" />
@@ -101,10 +104,14 @@
     <Compile Include="ClientAPI\Helpers\TestConnection.cs" />
     <Compile Include="ClientAPI\Helpers\TestEvent.cs" />
     <Compile Include="ClientAPI\Helpers\Writer.cs" />
+    <Compile Include="ClientAPI\isjson_flag_on_event.cs" />
     <Compile Include="ClientAPI\read_all_events_backward_should.cs" />
     <Compile Include="ClientAPI\read_all_events_forward_should.cs" />
     <Compile Include="ClientAPI\read_event_stream_backward_should.cs" />
     <Compile Include="ClientAPI\read_event_stream_forward_should.cs" />
+    <Compile Include="ClientAPI\Security\all_stream_with_no_acl_security.cs" />
+    <Compile Include="ClientAPI\Security\delete_stream_security.cs" />
+    <Compile Include="ClientAPI\Security\system_stream_security.cs" />
     <Compile Include="ClientAPI\Security\read_stream_security.cs" />
     <Compile Include="ClientAPI\Security\read_all_security.cs" />
     <Compile Include="ClientAPI\Security\read_stream_meta_security.cs" />
@@ -151,6 +158,7 @@
     <Compile Include="Helpers\PortsHelper.cs" />
     <Compile Include="Helpers\TestFixtureWithExistingEvents.cs" />
     <Compile Include="Helpers\TestFixtureWithReadWriteDispatchers.cs" />
+    <Compile Include="Http\ArgumentPassing\matching.cs" />
     <Compile Include="Http\BasicAuthentication\basic_authentication.cs" />
     <Compile Include="Http\HttpBehaviorSpecification.cs" />
     <Compile Include="Http\StreamSecurity\SetUpFixture.cs" />
@@ -181,7 +189,7 @@
     <Compile Include="Index\index_map_should_detect_corruption.cs" />
     <Compile Include="Index\table_index_should.cs" />
     <Compile Include="Index\table_index_with_two_ptables_and_memtable_on_range_query.cs" />
-    <Compile Include="Index\when_marking_an_index_map_as_corrupt.cs" />
+    <Compile Include="Index\when_marking_an_index_as_corrupt.cs" />
     <Compile Include="Index\saving_empty_index_to_a_file.cs" />
     <Compile Include="Index\saving_index_with_six_items_to_a_file.cs" />
     <Compile Include="Index\ptable_range_query_tests.cs" />
@@ -208,7 +216,9 @@
     <Compile Include="Infrastructure\IRandTestFinishCondition.cs" />
     <Compile Include="Infrastructure\IRandTestItemProcessor.cs" />
     <Compile Include="Infrastructure\RandomTestRunner.cs" />
-    <Compile Include="Services\Replication\DeleteStream\when_create_stream_gets_prepare_timeout_after_prepares.cs" />
+    <Compile Include="Services\Authentication\when_handling_multiple_requests_with_reset_password_cache_in_between.cs" />
+    <Compile Include="Services\Authentication\when_handling_multiple_requests_with_the_same_correct_user_name_and_password.cs" />
+    <Compile Include="Services\Replication\DeleteStream\when_delete_stream_gets_prepare_timeout_after_prepares.cs" />
     <Compile Include="Services\Replication\DeleteStream\when_delete_stream_completes_successfully.cs" />
     <Compile Include="Services\Replication\DeleteStream\when_creating_delete_stream_request_manager.cs" />
     <Compile Include="Services\Replication\DeleteStream\when_delete_stream_gets_already_committed.cs" />
@@ -226,13 +236,14 @@
     <Compile Include="Services\Replication\TransactionCommit\when_transaction_commit_gets_prepare_timeout_after_prepares.cs" />
     <Compile Include="Services\Replication\TransactionCommit\when_transaction_commit_gets_prepare_timeout_before_prepares.cs" />
     <Compile Include="Services\Replication\TransactionCommit\when_transaction_commit_gets_stream_deleted.cs" />
-    <Compile Include="Services\Replication\WriteEvents\when_creating_write_stream_request_manager.cs" />
-    <Compile Include="Services\Replication\WriteEvents\when_write_events_gets_already_committed.cs" />
-    <Compile Include="Services\Replication\WriteEvents\when_write_events_gets_prepare_timeout_after_prepares.cs" />
-    <Compile Include="Services\Replication\WriteEvents\when_write_stream_completes_successfully.cs" />
-    <Compile Include="Services\Replication\WriteEvents\when_write_stream_gets_commit_timeout_before_commit_stage.cs" />
-    <Compile Include="Services\Replication\WriteEvents\when_write_stream_gets_commit_timeout_before_final_commit.cs" />
-    <Compile Include="Services\Replication\WriteEvents\when_write_stream_gets_prepare_timeout_before_prepares.cs" />
+    <Compile Include="Services\Replication\WriteStream\when_creating_write_stream_request_manager.cs" />
+    <Compile Include="Services\Replication\WriteStream\when_write_stream_gets_stream_deleted.cs" />
+    <Compile Include="Services\Replication\WriteStream\when_write_stream_gets_already_committed.cs" />
+    <Compile Include="Services\Replication\WriteStream\when_write_stream_gets_prepare_timeout_after_prepares.cs" />
+    <Compile Include="Services\Replication\WriteStream\when_write_stream_completes_successfully.cs" />
+    <Compile Include="Services\Replication\WriteStream\when_write_stream_gets_commit_timeout_before_commit_stage.cs" />
+    <Compile Include="Services\Replication\WriteStream\when_write_stream_gets_commit_timeout_before_final_commit.cs" />
+    <Compile Include="Services\Replication\WriteStream\when_write_stream_gets_prepare_timeout_before_prepares.cs" />
     <Compile Include="Services\Storage\CheckCommitStartingAt\when_writing_few_prepares_with_same_expected_version_and_committing_one_of_them.cs" />
     <Compile Include="Services\Storage\CheckCommitStartingAt\when_writing_few_prepares_with_same_expected_version_and_not_committing_them.cs" />
     <Compile Include="Services\Storage\CheckCommitStartingAt\when_writing_prepares_in_wrong_order_and_committing_in_right_order.cs" />
@@ -261,9 +272,9 @@
     <Compile Include="Services\Storage\Scavenge\when_deleting_single_stream_spanning_through_2_chunks_in_db_with_3_chunks.cs" />
     <Compile Include="Services\Storage\Scavenge\when_deleting_single_stream_spanning_through_2_chunks_in_db_with_2_chunks.cs" />
     <Compile Include="Services\Storage\DeletingStream\when_deleting_stream_spanning_through_multiple_chunks_in_db_with_other_streams_read_index_should.cs" />
-    <Compile Include="Services\Storage\DeletingStream\when_deleting_streams_with_different_hashes_spanning_through_multiple_chunks_in_db_with_1_stream_with_same_hash_read_index_should.cs" />
-    <Compile Include="Services\Storage\DeletingStream\when_deleting_streams_with_same_hash_spanning_through_multiple_chunks_in_db_with_1_stream_with_different_hash_read_index_should.cs" />
-    <Compile Include="Services\Storage\DeletingStream\when_deleting_stream_spanning_through_multiple_chunks_and_1_stream_with_same_hash_and_1_stream_with_different_hash_read_index_should.cs" />
+    <Compile Include="Services\Storage\DeletingStream\deleting_stream_tests_2.cs" />
+    <Compile Include="Services\Storage\DeletingStream\deleting_stream_tests_3.cs" />
+    <Compile Include="Services\Storage\DeletingStream\deleting_stream_tests_1.cs" />
     <Compile Include="Services\Storage\DeletingStream\when_deleting_stream_spanning_through_multiple_chunks_read_index_should.cs" />
     <Compile Include="Services\Storage\DeletingStream\is_stream_deleted_should.cs" />
     <Compile Include="Services\Storage\DeletingStream\with_empty_db_read_index_should.cs" />
@@ -312,6 +323,7 @@
     <Compile Include="Services\Storage\HashCollisions\with_three_collisioned_streams_one_event_each_read_index_should.cs" />
     <Compile Include="Services\Transport\Http\Authentication\basic_http_authentication_provider.cs" />
     <Compile Include="Services\Transport\Http\Authentication\rfc_2898_password_hash_algorithm.cs" />
+    <Compile Include="Services\Authentication\with_internal_authentication_provider.cs" />
     <Compile Include="Services\Transport\Http\media_type.cs" />
     <Compile Include="Services\Transport\Http\atom_specs.cs" />
     <Compile Include="Services\Transport\Http\auto_convertion.cs" />
@@ -324,6 +336,7 @@
     <Compile Include="Services\Transport\Http\uri_router_should.cs" />
     <Compile Include="Services\Transport\Tcp\ssl_connection.cs" />
     <Compile Include="Services\Transport\Tcp\core_tcp_package.cs" />
+    <Compile Include="Services\UserManagementService\password_change_notification_reader.cs" />
     <Compile Include="Services\UserManagementService\user_management_service.cs" />
     <Compile Include="Services\VNode\vnode_fsm_should.cs" />
     <Compile Include="SpecificationWithDirectoryPerTestFixture.cs" />
@@ -334,17 +347,23 @@
     <Compile Include="SpecificationWithFile.cs" />
     <Compile Include="TestsInitFixture.cs" />
     <Compile Include="TransactionLog\Scavenging\scavenged_chunk.cs" />
+    <Compile Include="TransactionLog\Truncation\when_truncating_into_the_middle_of_completed_chunk.cs" />
+    <Compile Include="TransactionLog\Truncation\when_truncating_into_the_middle_of_ongoing_chunk.cs" />
+    <Compile Include="TransactionLog\Truncation\when_truncating_to_the_very_beginning_of_db.cs" />
+    <Compile Include="TransactionLog\Truncation\when_truncating_into_the_middle_of_multichunk.cs" />
     <Compile Include="TransactionLog\Truncation\TruncateAndReOpenDbScenario.cs" />
     <Compile Include="TransactionLog\Truncation\TruncateScenario.cs" />
     <Compile Include="TransactionLog\Truncation\when_truncating_few_chunks_with_index_on_disk.cs" />
     <Compile Include="TransactionLog\Truncation\when_truncating_few_chunks_with_index_on_disk_and_then_reopening_db.cs" />
-    <Compile Include="TransactionLog\Truncation\when_truncating_in_a_middle_of_scavenged_chunk_with_index_in_memory.cs" />
-    <Compile Include="TransactionLog\Truncation\when_truncating_in_a_middle_of_scavenged_chunk_with_index_in_memory_and_then_reopening_db.cs" />
+    <Compile Include="TransactionLog\Truncation\when_truncating_into_the_middle_of_scavenged_chunk_with_index_in_memory.cs" />
+    <Compile Include="TransactionLog\Truncation\when_truncating_into_the_middle_of_scavenged_chunk_with_index_in_memory_and_then_reopening_db.cs" />
+    <Compile Include="TransactionLog\Truncation\when_truncating_right_at_the_end_of_multichunk.cs" />
     <Compile Include="TransactionLog\Truncation\when_truncating_single_uncompleted_chunk_with_index_in_memory_and_then_reopening_db.cs" />
     <Compile Include="TransactionLog\Truncation\when_truncating_single_uncompleted_chunk_with_index_on_disk.cs" />
     <Compile Include="TransactionLog\Scavenging\when_metastream_is_scavenged_and_read_index_is_set_to_keep_last_3_metaevents.cs" />
     <Compile Include="TransactionLog\Scavenging\when_deleted_stream_with_metadata_is_scavenged.cs" />
     <Compile Include="TransactionLog\Scavenging\when_metastream_is_scavenged_and_read_index_is_set_to_keep_just_last_metaevent.cs" />
+    <Compile Include="TransactionLog\Validation\TFChunkDbCreationTestBase.cs" />
     <Compile Include="TransactionLog\when_reading_cached_empty_scavenged_tfchunk.cs" />
     <Compile Include="TransactionLog\when_reading_uncached_empty_scavenged_tfchunk.cs" />
     <Compile Include="TransactionLog\FlushTimeMeter.cs" />
@@ -357,10 +376,10 @@
     <Compile Include="TransactionLog\when_destroying_a_tfchunk.cs" />
     <Compile Include="TransactionLog\when_destroying_a_tfchunk_that_is_locked.cs" />
     <Compile Include="TransactionLog\when_marking_for_deletion_a_tfchunk_that_has_been_locked_and_unlocked.cs" />
-    <Compile Include="TransactionLog\when_truncating_database.cs" />
+    <Compile Include="TransactionLog\Truncation\when_truncating_database.cs" />
     <Compile Include="TransactionLog\when_unlocking_a_tfchunk_that_has_been_marked_for_deletion.cs" />
     <Compile Include="TransactionLog\commit_log_record_should.cs" />
-    <Compile Include="TransactionLog\when_validating_tfchunk_db_with_multi_chunks.cs" />
+    <Compile Include="TransactionLog\Validation\when_validating_tfchunk_db_with_multi_chunks.cs" />
     <Compile Include="TransactionLog\prepare_log_record_should.cs" />
     <Compile Include="TransactionLog\when_creating_tfchunk_from_empty_file.cs" />
     <Compile Include="TransactionLog\when_appending_past_end_of_a_tfchunk.cs" />
@@ -393,8 +412,8 @@
     <Compile Include="TransactionLog\when_creating_chunked_transaction_file_writer.cs" />
     <Compile Include="TransactionLog\when_opening_chunked_transaction_file_db_without_previous_files.cs" />
     <Compile Include="TransactionLog\when_reading_an_empty_chunked_transaction_log.cs" />
-    <Compile Include="TransactionLog\when_validating_tfchunk_db.cs" />
-    <Compile Include="TransactionLog\when_validating_tfchunkdb_without_previous_files.cs" />
+    <Compile Include="TransactionLog\Validation\when_validating_tfchunk_db.cs" />
+    <Compile Include="TransactionLog\Validation\when_validating_tfchunkdb_without_previous_files.cs" />
     <Compile Include="TransactionLog\when_writing_an_existing_chunked_transaction_file_with_checksum.cs" />
     <Compile Include="TransactionLog\when_writing_an_existing_chunked_transaction_file_with_checksum_and_data_bigger_than_buffer.cs" />
     <Compile Include="TransactionLog\when_writing_an_existing_chunked_transaction_file_with_not_enough_space_in_chunk.cs" />
@@ -431,7 +450,9 @@
   <ItemGroup>
     <EmbeddedResource Include="server.p12" />
   </ItemGroup>
-  <ItemGroup />
+  <ItemGroup>
+    <Folder Include="TransactionLog\Manager\" />
+  </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
        Other similar extension points exist, see Microsoft.Common.targets.

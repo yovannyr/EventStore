@@ -28,16 +28,26 @@
 
 namespace EventStore.Core.Services
 {
-    public static class SystemHeader
+    public static class SystemHeaders
     {
-        public const string ExpectedVersion = "X-ES-ExpectedVersion";
+        public const string ExpectedVersion = "ES-ExpectedVersion";
+        public const string RequireMaster = "ES-RequireMaster";
+        public const string ResolveLinkTos = "ES-ResolveLinkTos";
+        public const string TrsutedAuth = "ES-TrustedAuth";
+        public const string ProjectionPosition = "ES-Position";
     }
 
     public static class SystemStreams
     {
         public const string AllStream = "$all";
         public const string StreamsStream = "$streams";
+        public const string SettingsStream = "$settings";
         public const string StatsStreamPrefix = "$stats";
+
+        public static bool IsSystemStream(string streamId)
+        {
+            return streamId.StartsWith("$");
+        }
 
         public static string MetastreamOf(string streamId)
         {
@@ -64,8 +74,12 @@ namespace EventStore.Core.Services
         public const string Acl = "$acl";
         public const string AclRead = "$r";
         public const string AclWrite = "$w";
+        public const string AclDelete = "$d";
         public const string AclMetaRead = "$mr";
         public const string AclMetaWrite = "$mw";
+
+        public const string UserStreamAcl = "$userStreamAcl";
+        public const string SystemStreamAcl = "$systemStreamAcl";
     }
 
     public static class SystemEventTypes
@@ -74,6 +88,11 @@ namespace EventStore.Core.Services
         public const string StatsCollection = "$statsCollected";
         public const string LinkTo = "$>";
         public const string StreamMetadata = "$metadata";
+        public const string Settings = "$settings";
+
+        public const string V1__StreamCreated__ = "$stream-created";
+        public const string V1__StreamCreatedImplicit__ = "$stream-created-implicit";
+
     }
 
     public static class SystemUsers
@@ -82,8 +101,9 @@ namespace EventStore.Core.Services
         public const string DefaultAdminPassword = "changeit";
     }
 
-    public static class SystemUserGroups
+    public static class SystemRoles
     {
         public const string Admins = "$admins";
+        public const string All = "$all";
     }
 }

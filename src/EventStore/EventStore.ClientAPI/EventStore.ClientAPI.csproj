@@ -103,6 +103,8 @@
     <Compile Include="ConnectionSettingsBuilder.cs" />
     <Compile Include="ClusterSettings.cs" />
     <Compile Include="ClusterSettingsBuilder.cs" />
+    <Compile Include="SystemSettings.cs" />
+    <Compile Include="EventReadResult.cs" />
     <Compile Include="Core\EventStoreConnectionLogicHandler.cs" />
     <Compile Include="Core\IEndPointDiscoverer.cs" />
     <Compile Include="Core\OperationsManager.cs" />
@@ -114,6 +116,7 @@
     <Compile Include="Exceptions\NotAuthenticatedException.cs" />
     <Compile Include="IEventStoreConnection.cs" />
     <Compile Include="Core\IEventStoreTransactionConnection.cs" />
+    <Compile Include="StreamAcl.cs" />
     <Compile Include="SubscriptionDropReason.cs" />
     <Compile Include="Exceptions\AccessDeniedException.cs" />
     <Compile Include="StreamMetadata.cs" />
@@ -129,7 +132,6 @@
     <Compile Include="Exceptions\EventStoreConnectionException.cs" />
     <Compile Include="Exceptions\ServerErrorException.cs" />
     <Compile Include="ProjectionsClient.cs" />
-    <Compile Include="Properties\AssemblyVersion.cs" />
     <Compile Include="ReadDirection.cs" />
     <Compile Include="ResolvedEvent.cs" />
     <Compile Include="Exceptions\CannotEstablishConnectionException.cs" />
@@ -179,6 +181,7 @@
     <Compile Include="Transport.Tcp\TcpConfiguratin.cs" />
     <Compile Include="Transport.Tcp\TcpConnection.cs" />
     <Compile Include="Transport.Tcp\LengthPrefixFramer.cs" />
+    <Compile Include="Transport.Tcp\TcpConnectionLockless.cs" />
     <Compile Include="Transport.Tcp\TcpConnectionMonitor.cs" />
     <Compile Include="Transport.Tcp\TcpConnectionSsl.cs" />
     <Compile Include="Transport.Tcp\TcpStats.cs" />
@@ -191,9 +194,6 @@
     <Compile Include="Transport.Tcp\TcpConnectionBase.cs" />
     <Compile Include="ClientOperations\AppendToStreamOperation.cs" />
   </ItemGroup>
-  <ItemGroup>
-    <Content Include="Properties\ESCAVersion.txt" />
-  </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <PropertyGroup Condition=" '$(OS)' == 'Windows_NT' ">
     <PreBuildEvent>
@@ -204,6 +204,9 @@ $(MSBuildProjectDirectory)\..\Scripts\version\update-version.cmd $(MSBuildProjec
     <PreBuildEvent>
 $(MSBuildProjectDirectory)\..\Scripts\version\update-version.sh $(MSBuildProjectDirectory)
     </PreBuildEvent>
+  </PropertyGroup>
+  <PropertyGroup>
+    <PreBuildEvent />
   </PropertyGroup>
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
        Other similar extension points exist, see Microsoft.Common.targets.

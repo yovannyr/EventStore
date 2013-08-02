@@ -69,33 +69,34 @@ namespace EventStore.Core.Tests.Services.Transport.Http
         {
             _router = _uriRouterFactory();
 
-            _router.RegisterControllerAction(new ControllerAction("/", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
-            _router.RegisterControllerAction(new ControllerAction("/{placeholder}", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
-            _router.RegisterControllerAction(new ControllerAction("/halt", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
-            _router.RegisterControllerAction(new ControllerAction("/streams/{stream}/{event}/backward/{count}?embed={embed}", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
-            _router.RegisterControllerAction(new ControllerAction("/projection/{name}?deleteStateStream={deleteStateStream}&deleteCheckpointStream={deleteCheckpointStream}", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
-            _router.RegisterControllerAction(new ControllerAction("/s/stats/{*statPath}", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
-            _router.RegisterControllerAction(new ControllerAction("/streams/$all/", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
-            _router.RegisterControllerAction(new ControllerAction("/streams/$$all", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
+            _router.RegisterAction(new ControllerAction("/", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
+            _router.RegisterAction(new ControllerAction("/{placeholder}", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
+            _router.RegisterAction(new ControllerAction("/halt", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
+            _router.RegisterAction(new ControllerAction("/streams/{stream}/{event}/backward/{count}?embed={embed}", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
+            _router.RegisterAction(new ControllerAction("/projection/{name}?deleteStateStream={deleteStateStream}&deleteCheckpointStream={deleteCheckpointStream}", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
+            _router.RegisterAction(new ControllerAction("/s/stats/{*statPath}", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
+            _router.RegisterAction(new ControllerAction("/streams/$all/", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
+            _router.RegisterAction(new ControllerAction("/streams/$$all", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
+            _router.RegisterAction(new ControllerAction("/streams/$mono?param={param}", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
 
-            _router.RegisterControllerAction(new ControllerAction("/streams/test", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
-            _router.RegisterControllerAction(new ControllerAction("/streams/test", HttpMethod.Post, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
+            _router.RegisterAction(new ControllerAction("/streams/test", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
+            _router.RegisterAction(new ControllerAction("/streams/test", HttpMethod.Post, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
 
-            _router.RegisterControllerAction(new ControllerAction("/t/{placeholder1}/{placholder2}/{placeholder3}", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
-            _router.RegisterControllerAction(new ControllerAction("/t/{placeholder1}/{placholder2}/something", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
-            _router.RegisterControllerAction(new ControllerAction("/t/{placeholder1}/something/{placeholder3}", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
-            _router.RegisterControllerAction(new ControllerAction("/t/{placeholder1}/something/something", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
-            _router.RegisterControllerAction(new ControllerAction("/t/something/{placholder2}/{placeholder3}", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
-            _router.RegisterControllerAction(new ControllerAction("/t/something/{placholder2}/something", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
-            _router.RegisterControllerAction(new ControllerAction("/t/something/something/{placeholder3}", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
-            _router.RegisterControllerAction(new ControllerAction("/t/something/something/something", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
+            _router.RegisterAction(new ControllerAction("/t/{placeholder1}/{placholder2}/{placeholder3}", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
+            _router.RegisterAction(new ControllerAction("/t/{placeholder1}/{placholder2}/something", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
+            _router.RegisterAction(new ControllerAction("/t/{placeholder1}/something/{placeholder3}", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
+            _router.RegisterAction(new ControllerAction("/t/{placeholder1}/something/something", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
+            _router.RegisterAction(new ControllerAction("/t/something/{placholder2}/{placeholder3}", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
+            _router.RegisterAction(new ControllerAction("/t/something/{placholder2}/something", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
+            _router.RegisterAction(new ControllerAction("/t/something/something/{placeholder3}", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
+            _router.RegisterAction(new ControllerAction("/t/something/something/something", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
         }
 
         [Test]
         public void detect_duplicate_route()
         {
             Assert.That(() => 
-                _router.RegisterControllerAction(new ControllerAction("/halt", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { }),
+                _router.RegisterAction(new ControllerAction("/halt", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { }),
                 Throws.Exception.InstanceOf<ArgumentException>().With.Message.EqualTo("Duplicate route."));
         }
 
@@ -169,6 +170,20 @@ namespace EventStore.Core.Tests.Services.Transport.Http
 
             match = _router.GetAllUriMatches(Uri("/streams/$$all/"));
             Assert.AreEqual(0, match.Count);
+        }
+
+        [Test]
+        public void match_route_with_dollar_sign()
+        {
+            var match = _router.GetAllUriMatches(Uri("/streams/$mono"));
+            Assert.AreEqual(1, match.Count);
+            Assert.AreEqual("/streams/$mono?param={param}", match[0].ControllerAction.UriTemplate);
+            Assert.AreEqual(HttpMethod.Get, match[0].ControllerAction.HttpMethod);
+
+            match = _router.GetAllUriMatches(Uri("/streams/$mono?param=bla"));
+            Assert.AreEqual(1, match.Count);
+            Assert.AreEqual("/streams/$mono?param={param}", match[0].ControllerAction.UriTemplate);
+            Assert.AreEqual(HttpMethod.Get, match[0].ControllerAction.HttpMethod);
         }
 
         [Test]
@@ -261,7 +276,7 @@ namespace EventStore.Core.Tests.Services.Transport.Http
         public void match_greedy_route_in_the_root_to_any_path()
         {
             var tmpRouter = _uriRouterFactory();
-            tmpRouter.RegisterControllerAction(new ControllerAction("/{*greedy}", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
+            tmpRouter.RegisterAction(new ControllerAction("/{*greedy}", HttpMethod.Get, Codec.NoCodecs, FakeController.SupportedCodecs), (x, y) => { });
 
             var match = tmpRouter.GetAllUriMatches(Uri("/"));
             Assert.AreEqual(1, match.Count);

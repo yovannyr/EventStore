@@ -26,6 +26,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //  
 using System;
+using System.Net;
 using EventStore.ClientAPI.Common.Log;
 using EventStore.ClientAPI.Common.Utils;
 using EventStore.ClientAPI.SystemData;
@@ -45,7 +46,7 @@ namespace EventStore.ClientAPI
         private int _maxRetries = Consts.DefaultMaxOperationRetries;
         private int _maxReconnections = Consts.DefaultMaxReconnections;
 
-        private bool _allowForwarding = Consts.DefaultAllowForwarding;
+        private bool _requireMaster = Consts.DefaultRequireMaster;
 
         private TimeSpan _reconnectionDelay = Consts.DefaultReconnectionDelay;
         private TimeSpan _operationTimeout = Consts.DefaultOperationTimeout;
@@ -58,14 +59,15 @@ namespace EventStore.ClientAPI
 
         private Action<IEventStoreConnection, Exception> _errorOccurred;
         private Action<IEventStoreConnection, string> _closed;
-        private Action<IEventStoreConnection> _connected;
-        private Action<IEventStoreConnection> _disconnected;
+        private Action<IEventStoreConnection, IPEndPoint> _connected;
+        private Action<IEventStoreConnection, IPEndPoint> _disconnected;
         private Action<IEventStoreConnection> _reconnecting;
         private Action<IEventStoreConnection, string> _authenticationFailed;
 
         private bool _failOnNoServerResponse;
         private TimeSpan _heartbeatInterval = TimeSpan.FromMilliseconds(750);
         private TimeSpan _heartbeatTimeout = TimeSpan.FromMilliseconds(1500);
+        private TimeSpan _clientConnectionTimeout = TimeSpan.FromMilliseconds(1000);
 
         internal ConnectionSettingsBuilder()
         {
@@ -217,22 +219,22 @@ namespace EventStore.ClientAPI
         }
 
         /// <summary>
-        /// Enables the forwarding of operations in the Event Store (cluster version only) 
+        /// Requires all write and read requests to be served only by master (cluster version only) 
         /// </summary>
         /// <returns></returns>
-        public ConnectionSettingsBuilder EnableOperationsForwarding()
+        public ConnectionSettingsBuilder PerformOnMasterOnly()
         {
-            _allowForwarding = true;
+            _requireMaster = true;
             return this;
         }
 
         /// <summary>
-        /// Disables the forwarding operations in the Event Store (cluster version only)
+        /// Allow for writes to be forwarded and read requests served locally if node is not master (cluster version only) 
         /// </summary>
         /// <returns></returns>
-        public ConnectionSettingsBuilder DisableOperationsForwarding()
+        public ConnectionSettingsBuilder PerformOnAnyNode()
         {
-            _allowForwarding = false;
+            _requireMaster = false;
             return this;
         }
 
@@ -329,7 +331,7 @@ namespace EventStore.ClientAPI
         /// </summary>
         /// <param name="handler"></param>
         /// <returns></returns>
-        public ConnectionSettingsBuilder OnConnected(Action<IEventStoreConnection> handler)
+        public ConnectionSettingsBuilder OnConnected(Action<IEventStoreConnection, IPEndPoint> handler)
         {
             _connected = handler;
             return this;
@@ -340,7 +342,7 @@ namespace EventStore.ClientAPI
         /// </summary>
         /// <param name="handler"></param>
         /// <returns></returns>
-        public ConnectionSettingsBuilder OnDisconnected(Action<IEventStoreConnection> handler)
+        public ConnectionSettingsBuilder OnDisconnected(Action<IEventStoreConnection, IPEndPoint> handler)
         {
             _disconnected = handler;
             return this;
@@ -392,6 +394,12 @@ namespace EventStore.ClientAPI
             return this;
         }
 
+        public ConnectionSettingsBuilder WithConnectionTimeoutOf(TimeSpan timeout)
+        {
+            _clientConnectionTimeout = timeout;
+            return this;
+        }
+
         public static implicit operator ConnectionSettings(ConnectionSettingsBuilder builder)
         {
             return new ConnectionSettings(builder._log,
@@ -400,7 +408,7 @@ namespace EventStore.ClientAPI
                                           builder._maxConcurrentItems,
                                           builder._maxRetries,
                                           builder._maxReconnections,
-                                          builder._allowForwarding,
+                                          builder._requireMaster,
                                           builder._reconnectionDelay,
                                           builder._operationTimeout,
                                           builder._operationTimeoutCheckPeriod,
@@ -416,7 +424,8 @@ namespace EventStore.ClientAPI
                                           builder._authenticationFailed,
                                           builder._failOnNoServerResponse,
                                           builder._heartbeatInterval,
-                                          builder._heartbeatTimeout);
+                                          builder._heartbeatTimeout,
+                                          builder._clientConnectionTimeout);
         }
     }
 }

@@ -56,7 +56,7 @@ namespace EventStore.Core.Services.Transport.Http.Controllers
             _commonWeb = new MiniWeb("/web/es", Path.Combine(commonFSRoot, @"es-common-web"));
         }
 
-        protected override void SubscribeCore(IHttpService service, HttpMessagePipe pipe)
+        protected override void SubscribeCore(IHttpService service)
         {
             _singleNodeWeb.RegisterControllerActions(service);
             _commonWeb.RegisterControllerActions(service);
@@ -64,7 +64,7 @@ namespace EventStore.Core.Services.Transport.Http.Controllers
             HttpHelpers.RegisterRedirectAction(service, "", "/web/home.htm");
             HttpHelpers.RegisterRedirectAction(service, "/web", "/web/home.htm");
 
-            service.RegisterControllerAction(
+            service.RegisterAction(
                 new ControllerAction("/sys/subsystems", HttpMethod.Get, Codec.NoCodecs, new ICodec[] { Codec.Json }),
                 OnListNodeSubsystems);
         }

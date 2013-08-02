@@ -26,15 +26,16 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // 
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
 using EventStore.Common.Log;
 using EventStore.Common.Utils;
 using EventStore.Core.Bus;
-using EventStore.Core.Cluster;
 using EventStore.Core.Data;
 using EventStore.Core.Messages;
 using EventStore.Core.Messaging;
+using EventStore.Core.Services.Monitoring.Stats;
 using EventStore.Core.Services.Storage.EpochManager;
 using EventStore.Core.Services.Storage.ReaderIndex;
 using EventStore.Core.TransactionLog.Chunks;
@@ -50,12 +51,12 @@ namespace EventStore.Core.Services.Storage
                                         IHandle<StorageMessage.WriteTransactionStart>,
                                         IHandle<StorageMessage.WriteTransactionData>,
                                         IHandle<StorageMessage.WriteTransactionPrepare>,
-                                        IHandle<StorageMessage.WriteCommit>
+                                        IHandle<StorageMessage.WriteCommit>,
+                                        IHandle<MonitoringMessage.InternalStatsRequest>
     {
         private static readonly ILogger Log = LogManager.GetLoggerFor<StorageWriterService>();
 
         protected static readonly int TicksPerMs = (int)(Stopwatch.Frequency / 1000);
-        private static readonly int MinFlushDelay = 2*TicksPerMs;
         private static readonly TimeSpan WaitForChaserSingleIterationTimeout = TimeSpan.FromMilliseconds(100);
 
         protected readonly TFChunkDb Db;
@@ -69,15 +70,28 @@ namespace EventStore.Core.Services.Storage
         private readonly InMemoryBus _writerBus;
 
         private readonly Stopwatch _watch = Stopwatch.StartNew();
-        private long _flushDelay;
-        private long _lastFlush;
+        private readonly int _minFlushDelay;
+        private long _lastFlushDelay;
+        private long _lastFlushTimestamp;
 
         protected int FlushMessagesInQueue;
         private VNodeState _vnodeState = VNodeState.Initializing;
         protected bool BlockWriter = false;
 
+        private const int LastStatsCount = 1024;
+        private readonly long[] _lastFlushDelays = new long[LastStatsCount];
+        private readonly long[] _lastFlushSizes = new long[LastStatsCount];
+        private int _statIndex;
+        private int _statCount;
+        private long _sumFlushDelay;
+        private long _sumFlushSize;
+        private long _lastFlushSize;
+        private long _maxFlushSize;
+        private long _maxFlushDelay;
+
         public StorageWriterService(IPublisher bus, 
                                     ISubscriber subscribeToBus,
+                                    int minFlushDelayMs,
                                     TFChunkDb db,
                                     TFChunkWriter writer, 
                                     IReadIndex readIndex,
@@ -85,6 +99,7 @@ namespace EventStore.Core.Services.Storage
         {
             Ensure.NotNull(bus, "bus");
             Ensure.NotNull(subscribeToBus, "subscribeToBus");
+            Ensure.Nonnegative(minFlushDelayMs, "minFlushDelayMs");
             Ensure.NotNull(db, "db");
             Ensure.NotNull(writer, "writer");
             Ensure.NotNull(readIndex, "readIndex");
@@ -96,8 +111,9 @@ namespace EventStore.Core.Services.Storage
             ReadIndex = readIndex;
             EpochManager = epochManager;
 
-            _flushDelay = 0;
-            _lastFlush = _watch.ElapsedTicks;
+            _minFlushDelay = minFlushDelayMs * TicksPerMs;
+            _lastFlushDelay = 0;
+            _lastFlushTimestamp = _watch.ElapsedTicks;
 
             Writer = writer;
             Writer.Open();
@@ -157,7 +173,16 @@ namespace EventStore.Core.Services.Storage
                 return;
             }
 
-            _writerBus.Handle(message);
+            try
+            {
+                _writerBus.Handle(message);
+            }
+            catch (Exception exc)
+            {
+                BlockWriter = true;
+                Log.FatalException(exc, "Unexpected error in StorageWriterService. Terminating the process...");
+                Application.Exit(ExitCode.Error, string.Format("Unexpected error in StorageWriterService: {0}", exc.Message));
+            }
         }
 
         void IHandle<SystemMessage.SystemInit>.Handle(SystemMessage.SystemInit message)
@@ -212,7 +237,8 @@ namespace EventStore.Core.Services.Storage
             }
 
             var totalTime = message.TotalTimeWasted + sw.Elapsed;
-            Log.Debug("Still waiting for chaser to catch up already for {0}...", totalTime);
+            if (totalTime < TimeSpan.FromSeconds(5) || (int)totalTime.TotalSeconds % 5 == 0) // too verbose otherwise
+                Log.Debug("Still waiting for chaser to catch up already for {0}...", totalTime);
             Bus.Publish(new SystemMessage.WaitForChaserToCatchUp(message.CorrelationId, totalTime));
         }
 
@@ -316,7 +342,8 @@ namespace EventStore.Core.Services.Storage
             {
                 var logPosition = Writer.Checkpoint.ReadNonFlushed();
                 var transactionInfo = ReadIndex.GetTransactionInfo(Writer.Checkpoint.Read(), message.TransactionId);
-                CheckTransactionInfo(message.TransactionId, transactionInfo);
+                if (!CheckTransactionInfo(message.TransactionId, transactionInfo))
+                    return;
 
                 if (message.Events.Length > 0)
                 {
@@ -361,7 +388,8 @@ namespace EventStore.Core.Services.Storage
                     return;
 
                 var transactionInfo = ReadIndex.GetTransactionInfo(Writer.Checkpoint.Read(), message.TransactionId);
-                CheckTransactionInfo(message.TransactionId, transactionInfo);
+                if (!CheckTransactionInfo(message.TransactionId, transactionInfo))
+                    return;
 
                 var record = LogRecord.TransactionEnd(Writer.Checkpoint.ReadNonFlushed(),
                                                       message.CorrelationId,
@@ -381,17 +409,18 @@ namespace EventStore.Core.Services.Storage
             }
         }
 
-        private void CheckTransactionInfo(long transactionId, TransactionInfo transactionInfo)
+        private bool CheckTransactionInfo(long transactionId, TransactionInfo transactionInfo)
         {
             if (transactionInfo.TransactionOffset < -1 || transactionInfo.EventStreamId.IsEmptyString())
             {
-                throw new Exception(
-                        string.Format("Invalid transaction info found for transaction ID {0}. " 
-                                      + "Possibly wrong transactionId provided. TransactionOffset: {1}, EventStreamId: {2}",
-                                      transactionId,
-                                      transactionInfo.TransactionOffset,
-                                      transactionInfo.EventStreamId.IsEmptyString() ? "<null>" : transactionInfo.EventStreamId));
+                Log.Error(string.Format("Invalid transaction info found for transaction ID {0}. " 
+                                        + "Possibly wrong transactionId provided. TransactionOffset: {1}, EventStreamId: {2}",
+                                        transactionId,
+                                        transactionInfo.TransactionOffset,
+                                        transactionInfo.EventStreamId.IsEmptyString() ? "<null>" : transactionInfo.EventStreamId));
+                return false;
             }
+            return true;
         }
 
         void IHandle<StorageMessage.WriteCommit>.Handle(StorageMessage.WriteCommit message)
@@ -528,13 +557,34 @@ namespace EventStore.Core.Services.Storage
         protected bool Flush(bool force = false)
         {
             var start = _watch.ElapsedTicks;
-            if (force || FlushMessagesInQueue == 0 || start - _lastFlush >= _flushDelay + MinFlushDelay)
+            if (force || FlushMessagesInQueue == 0 || start - _lastFlushTimestamp >= _lastFlushDelay + _minFlushDelay)
             {
+                var flushSize = Writer.Checkpoint.ReadNonFlushed() - Writer.Checkpoint.Read();
+
                 Writer.Flush();
 
                 var end = _watch.ElapsedTicks;
-                _flushDelay = end - start;
-                _lastFlush = end;
+                var flushDelay = end - start;
+                Interlocked.Exchange(ref _lastFlushDelay, flushDelay);
+                Interlocked.Exchange(ref _lastFlushSize, flushSize);
+                _lastFlushTimestamp = end;
+
+                if (_statCount >= LastStatsCount)
+                {
+                    Interlocked.Add(ref _sumFlushSize, -_lastFlushSizes[_statIndex]);
+                    Interlocked.Add(ref _sumFlushDelay, -_lastFlushDelays[_statIndex]);
+                }
+                else
+                {
+                    _statCount += 1;
+                }
+                _lastFlushSizes[_statIndex] = flushSize;
+                _lastFlushDelays[_statIndex] = flushDelay;
+                Interlocked.Add(ref _sumFlushSize, flushSize);
+                Interlocked.Add(ref _sumFlushDelay, flushDelay);
+                Interlocked.Exchange(ref _maxFlushSize, Math.Max(Interlocked.Read(ref _maxFlushSize), flushSize));
+                Interlocked.Exchange(ref _maxFlushDelay, Math.Max(Interlocked.Read(ref _maxFlushDelay), flushDelay));
+                _statIndex = (_statIndex + 1) & (LastStatsCount - 1);
 
                 return true;
             }
@@ -551,6 +601,31 @@ namespace EventStore.Core.Services.Storage
                 WrittenPos = writtenPos;
                 NewPos = newPos;
             }
+        }
+
+        public void Handle(MonitoringMessage.InternalStatsRequest message)
+        {
+            var lastFlushSize = Interlocked.Read(ref _lastFlushSize);
+            var lastFlushDelayMs = Interlocked.Read(ref _lastFlushDelay) / (double)TicksPerMs;
+            var statCount = _statCount;
+            var meanFlushSize = statCount == 0 ? 0 : Interlocked.Read(ref _sumFlushSize) / statCount;
+            var meanFlushDelayMs = statCount == 0 ? 0 : Interlocked.Read(ref _sumFlushDelay) / (double)TicksPerMs / statCount;
+            var maxFlushSize = Interlocked.Read(ref _maxFlushSize);
+            var maxFlushDelayMs = Interlocked.Read(ref _maxFlushDelay) / (double)TicksPerMs;
+            var queuedFlushMessages = FlushMessagesInQueue;
+
+            var stats = new Dictionary<string, object>
+            {
+                {"es-writer-lastFlushSize", new StatMetadata(lastFlushSize, "Writer Last Flush Size")},
+                {"es-writer-lastFlushDelayMs", new StatMetadata(lastFlushDelayMs, "Writer Last Flush Delay, ms")},
+                {"es-writer-meanFlushSize", new StatMetadata(meanFlushSize, "Writer Mean Flush Size")},
+                {"es-writer-meanFlushDelayMs", new StatMetadata(meanFlushDelayMs, "Writer Mean Flush Delay, ms")},
+                {"es-writer-maxFlushSize", new StatMetadata(maxFlushSize, "Writer Max Flush Size")},
+                {"es-writer-maxFlushDelayMs", new StatMetadata(maxFlushDelayMs, "Writer Max Flush Delay, ms")},
+                {"es-writer-queuedFlushMessages", new StatMetadata(queuedFlushMessages, "Writer Queued Flush Message")}
+            };
+
+            message.Envelope.ReplyWith(new MonitoringMessage.InternalStatsRequestResponse(stats));
         }
     }
 }

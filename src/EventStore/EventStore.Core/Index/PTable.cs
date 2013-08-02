@@ -50,7 +50,8 @@ namespace EventStore.Core.Index
         public const int IndexEntrySize = sizeof(int) + sizeof(int) + sizeof(long);
         public const int MD5Size = 16;
         public const byte Version = 1;
-        public const int DefaultBufferSize = 8096;
+        public const int DefaultBufferSize = 8192;
+        public const int DefaultSequentialBufferSize = 65536;
 
         private static readonly ILogger Log = LogManager.GetLoggerFor<PTable>();
 
@@ -70,7 +71,7 @@ namespace EventStore.Core.Index
 
         private PTable(string filename, 
                        Guid id, 
-                       int bufferSize = DefaultBufferSize, 
+                       int bufferSize = DefaultSequentialBufferSize, 
                        int initialReaders = ESConsts.PTableInitialReaderCount, 
                        int maxReaders = ESConsts.PTableMaxReaderCount, 
                        int depth = 16)
@@ -93,7 +94,7 @@ namespace EventStore.Core.Index
             _workItems = new ObjectPool<WorkItem>(string.Format("PTable {0} work items", _id),
                                                   initialReaders,
                                                   maxReaders,
-                                                  () => new WorkItem(filename, IndexEntrySize),
+                                                  () => new WorkItem(filename, DefaultBufferSize),
                                                   workItem => workItem.Dispose(),
                                                   pool => OnAllWorkItemsDisposed());
 
@@ -134,6 +135,7 @@ namespace EventStore.Core.Index
                 return null;
 
             var workItem = GetWorkItem();
+            //TODO GFY can make slightly faster with a sequential worker.
             try
             {
                 int midpointsCount;
@@ -147,11 +149,12 @@ namespace EventStore.Core.Index
                 {
                     throw new PossibleToHandleOutOfMemoryException("Failed to allocate memory for Midpoint cache.", exc);
                 }
-
+                workItem.Stream.Seek(PTableHeader.Size, SeekOrigin.Begin);
                 for (int k = 0; k < midpointsCount; ++k)
                 {
-                    int index = (int)((long)k * (Count - 1) / (midpointsCount - 1));
-                    midpoints[k] = new Midpoint(ReadEntry(index, workItem).Key, index);
+                    var nextindex = (int)((long)k * (Count - 1) / (midpointsCount - 1));
+                    ReadUntil(IndexEntrySize * (long)nextindex + PTableHeader.Size, workItem);
+                    midpoints[k] = new Midpoint(ReadNextNoSeek(workItem).Key, nextindex);
                 }
 
                 return midpoints;
@@ -160,6 +163,21 @@ namespace EventStore.Core.Index
             {
                 ReturnWorkItem(workItem);
             }
+        }
+
+        static byte[] crap = new byte[255];
+        private void ReadUntil(long nextindex, WorkItem workItem)
+        {
+            long toRead = 0;
+            do
+            {
+                toRead = nextindex - workItem.Stream.Position;
+                toRead = toRead > 255 ? 255 : toRead;
+                if (toRead > 0)
+                    workItem.Stream.Read(crap, 0, (int) toRead);
+                if (toRead < 0)
+                    workItem.Stream.Seek(nextindex, SeekOrigin.Begin);
+            } while (toRead > 0);
         }
 
         public void VerifyFileHash()
@@ -173,13 +191,20 @@ namespace EventStore.Core.Index
                 var fileHash = new byte[MD5Size];
                 workItem.Stream.Read(fileHash, 0, MD5Size);
                 
-                if (hash == null || fileHash.Length != hash.Length) 
-                    throw new CorruptIndexException(new HashValidationException());
+                if (hash == null)
+                    throw new CorruptIndexException(new HashValidationException("Calculated MD5 hash is null!"));
+                if (fileHash.Length != hash.Length)
+                    throw new CorruptIndexException(new HashValidationException(
+                        string.Format("Hash sizes differ! FileHash({0}): {1}, hash({2}): {3}.",
+                                      fileHash.Length, BitConverter.ToString(fileHash),
+                                      hash.Length, BitConverter.ToString(hash))));
 
                 for (int i = 0; i < fileHash.Length; i++)
                 {
                     if (fileHash[i] != hash[i])
-                        throw new CorruptIndexException(new HashValidationException());
+                        throw new CorruptIndexException(new HashValidationException(
+                            string.Format("Hashes are different! FileHash: {0}, hash: {1}.",
+                                          BitConverter.ToString(fileHash), BitConverter.ToString(hash))));
                 }
             }
             finally

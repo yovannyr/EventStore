@@ -93,7 +93,7 @@ namespace EventStore.Core.Services.Storage.EpochManager
                             var rec = result.LogRecord;
                             if (rec.RecordType != LogRecordType.System || ((SystemLogRecord)rec).SystemRecordType != SystemRecordType.Epoch)
                                 continue;
-                            epochPos = rec.Position;
+                            epochPos = rec.LogPosition;
                             break;
                         }
                     }
@@ -285,7 +285,6 @@ namespace EventStore.Core.Services.Storage.EpochManager
                 _lastEpochPosition = epoch.EpochPosition;
                 _minCachedEpochNumber = Math.Max(_minCachedEpochNumber, epoch.EpochNumber - CachedEpochCount + 1);
                 _epochs.Remove(_minCachedEpochNumber - 1);
-
 
                 if (flushWriter)
                     _writer.Flush();

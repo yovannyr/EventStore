@@ -103,13 +103,14 @@ namespace EventStore.Projections.Core.Services.Management
         private readonly Guid _id;
         private readonly int _projectionId;
         private readonly string _name;
+        private readonly bool _enabledToRun;
         private ManagedProjectionState _state;
         private PersistedState _persistedState = new PersistedState();
-        private int _version;
+        //private int _version;
 
         private string _faultedReason;
         private Action _onStopped;
-        private List<IEnvelope> _debugStateRequests;
+        //private List<IEnvelope> _debugStateRequests;
         private ProjectionStatistics _lastReceivedStatistics;
         private Action _onPrepared;
         private Action _onStarted;
@@ -118,7 +119,7 @@ namespace EventStore.Projections.Core.Services.Management
         private IPrincipal _runAs;
 
         public ManagedProjection(
-            IPublisher coreQueue, Guid id, int projectionId, string name, ILogger logger,
+            IPublisher coreQueue, Guid id, int projectionId, string name, bool enabledToRun, ILogger logger,
             RequestResponseDispatcher<ClientMessage.WriteEvents, ClientMessage.WriteEventsCompleted> writeDispatcher,
             RequestResponseDispatcher
                 <ClientMessage.ReadStreamEventsBackward, ClientMessage.ReadStreamEventsBackwardCompleted> readDispatcher,
@@ -133,6 +134,7 @@ namespace EventStore.Projections.Core.Services.Management
             _id = id;
             _projectionId = projectionId;
             _name = name;
+            _enabledToRun = enabledToRun;
             _logger = logger;
             _writeDispatcher = writeDispatcher;
             _readDispatcher = readDispatcher;
@@ -210,11 +212,12 @@ namespace EventStore.Projections.Core.Services.Management
                 status = _lastReceivedStatistics.Clone();
                 status.Mode = GetMode();
                 status.Name = _name;
-                status.Status = status.Status == "Stopped" && _state == ManagedProjectionState.Completed
+                var enabledSuffix = ((_state == ManagedProjectionState.Stopped || _state == ManagedProjectionState.Faulted) && Enabled ? " (Enabled)" : "");
+                status.Status = (status.Status == "Stopped" && _state == ManagedProjectionState.Completed
                                     ? _state.EnumValueName()
                                     : (!status.Status.StartsWith(_state.EnumValueName())
                                            ? _state.EnumValueName() + "/" + status.Status
-                                           : status.Status);
+                                           : status.Status)) + enabledSuffix;
                 status.MasterStatus = _state;
             }
             if (_state == ManagedProjectionState.Faulted)
@@ -226,7 +229,7 @@ namespace EventStore.Projections.Core.Services.Management
         public void Handle(ProjectionManagementMessage.GetQuery message)
         {
             _lastAccessed = _timeProvider.Now;
-            if (!ProjectionManagementMessage.RunAs.ValidateRunAs(_runAs, message)) return;
+            if (!ProjectionManagementMessage.RunAs.ValidateRunAs(Mode, ReadWrite.Read, _runAs, message)) return;
 
             var emitEnabled = _persistedState.EmitEnabled ?? false;
             message.Envelope.ReplyWith(
@@ -236,7 +239,7 @@ namespace EventStore.Projections.Core.Services.Management
         public void Handle(ProjectionManagementMessage.UpdateQuery message)
         {
             _lastAccessed = _timeProvider.Now;
-            if (!ProjectionManagementMessage.RunAs.ValidateRunAs(_runAs, message)) return;
+            if (!ProjectionManagementMessage.RunAs.ValidateRunAs(Mode, ReadWrite.Write, _runAs, message)) return;
 
             Stop(() => DoUpdateQuery(message));
         }
@@ -264,14 +267,14 @@ namespace EventStore.Projections.Core.Services.Management
         public void Handle(ProjectionManagementMessage.Disable message)
         {
             _lastAccessed = _timeProvider.Now;
-            if (!ProjectionManagementMessage.RunAs.ValidateRunAs(_runAs, message)) return;
+            if (!ProjectionManagementMessage.RunAs.ValidateRunAs(Mode, ReadWrite.Write, _runAs, message)) return;
             Stop(() => DoDisable(message));
         }
 
         public void Handle(ProjectionManagementMessage.Enable message)
         {
             _lastAccessed = _timeProvider.Now;
-            if (!ProjectionManagementMessage.RunAs.ValidateRunAs(_runAs, message)) return;
+            if (!ProjectionManagementMessage.RunAs.ValidateRunAs(Mode, ReadWrite.Write, _runAs, message)) return;
             if (Enabled && _state == ManagedProjectionState.Running)
             {
                 message.Envelope.ReplyWith(
@@ -283,7 +286,7 @@ namespace EventStore.Projections.Core.Services.Management
             Action completed = () =>
                 {
                     if (_state == ManagedProjectionState.Prepared)
-                        Start(() => message.Envelope.ReplyWith(new ProjectionManagementMessage.Updated(message.Name)));
+                        StartOrLoadStopped(() => message.Envelope.ReplyWith(new ProjectionManagementMessage.Updated(message.Name)));
                     else
                         message.Envelope.ReplyWith(
                             new ProjectionManagementMessage.Updated(message.Name));
@@ -297,7 +300,8 @@ namespace EventStore.Projections.Core.Services.Management
             _lastAccessed = _timeProvider.Now;
             if (
                 !ProjectionManagementMessage.RunAs.ValidateRunAs(
-                    _runAs, message, message.Action == ProjectionManagementMessage.SetRunAs.SetRemove.Set)) return;
+                    Mode, ReadWrite.Write, _runAs, message,
+                    message.Action == ProjectionManagementMessage.SetRunAs.SetRemove.Set)) return;
 
 
             Stop(
@@ -323,7 +327,7 @@ namespace EventStore.Projections.Core.Services.Management
         public void Handle(ProjectionManagementMessage.Reset message)
         {
             _lastAccessed = _timeProvider.Now;
-            if (!ProjectionManagementMessage.RunAs.ValidateRunAs(_runAs, message)) return;
+            if (!ProjectionManagementMessage.RunAs.ValidateRunAs(Mode, ReadWrite.Write, _runAs, message)) return;
             Stop(
                 () =>
                     {
@@ -335,14 +339,14 @@ namespace EventStore.Projections.Core.Services.Management
                                 () =>
                                 StartOrLoadStopped(
                                     () =>
-                                    message.Envelope.ReplyWith(new ProjectionManagementMessage.Updated(message.Name)))));
+                                        message.Envelope.ReplyWith(new ProjectionManagementMessage.Updated(message.Name)))));
                     });
         }
 
         public void Handle(ProjectionManagementMessage.Delete message)
         {
             _lastAccessed = _timeProvider.Now;
-            if (!ProjectionManagementMessage.RunAs.ValidateRunAs(_runAs, message)) return;
+            if (!ProjectionManagementMessage.RunAs.ValidateRunAs(Mode, ReadWrite.Write, _runAs, message)) return;
             Stop(() => DoDelete(message));
         }
 
@@ -471,11 +475,12 @@ namespace EventStore.Projections.Core.Services.Management
 
         private void BeginLoad(string name)
         {
+            var corrId = Guid.NewGuid();
             _readDispatcher.Publish(
                 new ClientMessage.ReadStreamEventsBackward(
-                    Guid.NewGuid(), _readDispatcher.Envelope, "$projections-" + name, -1, 1, 
-                    resolveLinks: false, validationStreamVersion: null, user: SystemAccount.Principal), 
-                LoadCompleted);
+                    corrId, corrId, _readDispatcher.Envelope, "$projections-" + name, -1, 1, 
+                    resolveLinkTos: false, requireMaster: false, validationStreamVersion: null, user: SystemAccount.Principal), 
+                completed => LoadCompleted(completed));
         }
 
         private void LoadCompleted(ClientMessage.ReadStreamEventsBackwardCompleted completed)
@@ -488,11 +493,12 @@ namespace EventStore.Projections.Core.Services.Management
                 _lastWrittenVersion = completed.Events[0].Event.EventNumber;
                 FixUpOldFormat(completed, persistedState);
                 FixupOldProjectionModes(persistedState);
+                FixUpOldProjectionRunAs(persistedState);
 
                 LoadPersistedState(persistedState);
                 //TODO: encapsulate this into managed projection
                 _state = ManagedProjectionState.Loaded;
-                if (Enabled)
+                if (Enabled && _enabledToRun)
                 {
                     if (Mode >= ProjectionMode.Continuous)
                         Prepare(() => Start(() => { }));
@@ -507,6 +513,15 @@ namespace EventStore.Projections.Core.Services.Management
             _logger.Trace(
                 "Projection manager did not find any projection configuration records in the {0} stream.  Projection stays in CREATING state",
                 completed.EventStreamId);
+        }
+
+        private void FixUpOldProjectionRunAs(PersistedState persistedState)
+        {
+            if (persistedState.RunAs == null || string.IsNullOrEmpty(persistedState.RunAs.Name))
+            {
+                _runAs = SystemAccount.Principal;
+                persistedState.RunAs = SerializePrincipal(ProjectionManagementMessage.RunAs.System);
+            }
         }
 
         private void FixUpOldFormat(ClientMessage.ReadStreamEventsBackwardCompleted completed, PersistedState persistedState)
@@ -580,9 +595,10 @@ namespace EventStore.Projections.Core.Services.Management
             }
             var managedProjectionSerializedState = _persistedState.ToJsonBytes();
             var eventStreamId = "$projections-" + _name;
+            var corrId = Guid.NewGuid();
             _writeDispatcher.Publish(
                 new ClientMessage.WriteEvents(
-                    Guid.NewGuid(), _writeDispatcher.Envelope, true, eventStreamId, ExpectedVersion.Any,
+                    corrId, corrId, _writeDispatcher.Envelope, true, eventStreamId, ExpectedVersion.Any,
                     new Event(Guid.NewGuid(), "$ProjectionUpdated", true, managedProjectionSerializedState, Empty.ByteArray),
                     SystemAccount.Principal),
                 m => WriteCompleted(m, completed, eventStreamId));
@@ -836,7 +852,7 @@ namespace EventStore.Projections.Core.Services.Management
         {
             if (_state == ManagedProjectionState.Prepared)
             {
-                if (Enabled)
+                if (Enabled && _enabledToRun)
                     Start(completed);
                 else
                     LoadStopped(completed);

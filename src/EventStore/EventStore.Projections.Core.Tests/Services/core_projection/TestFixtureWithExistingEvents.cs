@@ -73,6 +73,7 @@ namespace EventStore.Projections.Core.Tests.Services.core_projection
                 _subscriptionDispatcher.CreateSubscriber<EventReaderSubscriptionMessage.CheckpointSuggested>());
             _bus.Subscribe(_subscriptionDispatcher.CreateSubscriber<EventReaderSubscriptionMessage.EofReached>());
             _bus.Subscribe(_subscriptionDispatcher.CreateSubscriber<EventReaderSubscriptionMessage.ProgressChanged>());
+            _bus.Subscribe(_subscriptionDispatcher.CreateSubscriber<EventReaderSubscriptionMessage.NotAuthorized>());
             _bus.Subscribe<ProjectionCoreServiceMessage.CoreTick>(this);
             _bus.Subscribe<ReaderCoreServiceMessage.ReaderTick>(this);
         }
@@ -99,7 +100,7 @@ namespace EventStore.Projections.Core.Tests.Services.core_projection
             Guid? correlationId = null)
         {
             return new ClientMessage.WriteEvents(
-                correlationId ?? Guid.NewGuid(), new PublishEnvelope(GetInputQueue()), false, streamId,
+                Guid.NewGuid(), correlationId ?? Guid.NewGuid(), new PublishEnvelope(GetInputQueue()), false, streamId,
                 ExpectedVersion.Any, new Event(Guid.NewGuid(), eventType, isJson, data, metadata), null);
         }
     }

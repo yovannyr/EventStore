@@ -27,7 +27,6 @@
 // 
 
 using System;
-using System.Diagnostics;
 using System.IO;
 using EventStore.Common.Utils;
 using EventStore.Core.Exceptions;
@@ -310,7 +309,7 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk
                     if (!TryReadForwardInternal(workItem, actualPosition, out length, out record))
                         return RecordReadResult.Failure;
 
-                    long nextLogicalPos = Chunk.ChunkHeader.GetLocalLogPosition(record.Position + length + 2*sizeof(int));
+                    long nextLogicalPos = Chunk.ChunkHeader.GetLocalLogPosition(record.LogPosition + length + 2*sizeof(int));
                     return new RecordReadResult(true, nextLogicalPos, record, length);
                 }
                 finally
@@ -343,7 +342,7 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk
                     if (!TryReadBackwardInternal(workItem, actualPosition, out length, out record))
                         return RecordReadResult.Failure;
 
-                    long nextLogicalPos = Chunk.ChunkHeader.GetLocalLogPosition(record.Position);
+                    long nextLogicalPos = Chunk.ChunkHeader.GetLocalLogPosition(record.LogPosition);
                     return new RecordReadResult(true, nextLogicalPos, record, length);
                 }
                 finally
@@ -490,12 +489,18 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk
                 }
 
                 record = LogRecord.ReadFrom(workItem.Reader);
-#if DEBUG
+
                 // verify suffix length == prefix length
                 int suffixLength = workItem.Reader.ReadInt32();
                 if (suffixLength != length)
-                    throw new Exception(string.Format("Prefix/suffix length inconsistency: Prefix length({0}) != suffix length ({1})", length, suffixLength));
-#endif
+                {
+                    throw new Exception(
+                        string.Format("Prefix/suffix length inconsistency: prefix length({0}) != suffix length ({1}).\n"
+                                      + "Actual pre-position: {2}. Something is seriously wrong in chunk {3}-{4} ({5}).",
+                                      length, suffixLength, actualPosition, 
+                                      Chunk.ChunkHeader.ChunkStartNumber, Chunk.ChunkHeader.ChunkEndNumber, Chunk.FileName));
+                }
+
                 return true;
             }
 
@@ -536,13 +541,20 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk
                                       Chunk.ChunkHeader.ChunkStartNumber, Chunk.ChunkHeader.ChunkEndNumber, Chunk.FileName));
                 }
 
-                workItem.Stream.Position = realPos - length - sizeof(int); 
+                workItem.Stream.Position = realPos - length - 2*sizeof(int);
+
+                // verify suffix length == prefix length
+                int prefixLength = workItem.Reader.ReadInt32();
+                if (prefixLength != length)
+                {
+                    throw new Exception(
+                            string.Format("Prefix/suffix length inconsistency: prefix length({0}) != suffix length ({1})"
+                                          + "Actual post-position: {2}. Something is seriously wrong in chunk {3}-{4} ({5}).",
+                                          prefixLength, length, actualPosition,
+                                          Chunk.ChunkHeader.ChunkStartNumber, Chunk.ChunkHeader.ChunkEndNumber, Chunk.FileName));
+                }
                 record = LogRecord.ReadFrom(workItem.Reader);
-#if DEBUG
-                workItem.Stream.Position = realPos - length - 2 * sizeof(int);
-                var prefixLength = workItem.Reader.ReadInt32();
-                Debug.Assert(prefixLength == length);
-#endif
+
                 return true;
             }
         }

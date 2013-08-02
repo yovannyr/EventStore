@@ -67,24 +67,22 @@ namespace EventStore.Core
                 {
                     Console.WriteLine("Options:");
                     Console.WriteLine(options.GetUsage());
-                    return 0;
                 }
-
-                if (options.ShowVersion)
+                else if (options.ShowVersion)
                 {
                     Console.WriteLine("EventStore version {0} ({1}/{2}, {3})",
-                                      VersionInfo.Version,
-                                      VersionInfo.Branch,
-                                      VersionInfo.Hashtag,
-                                      VersionInfo.Timestamp);
-                    return 0;
+                                      VersionInfo.Version, VersionInfo.Branch, VersionInfo.Hashtag, VersionInfo.Timestamp);
+                    Application.ExitSilent(0, "Normal exit.");
                 }
+                else
+                {
+                    Init(options);
+                    CommitSuicideIfInBoehmOrOnBadVersionsOfMono(options);
+                    Create(options);
+                    Start();
 
-                Init(options);
-                Create(options);
-                Start();
-
-                _exitEvent.Wait();
+                    _exitEvent.Wait();
+                }
             }
             catch (OptionException exc)
             {
@@ -96,11 +94,12 @@ namespace EventStore.Core
             }
             catch (ApplicationInitializationException ex)
             {
+                Log.FatalException(ex, "Application initialization error: {0}.", FormatExceptionMessage(ex));
                 Application.Exit(ExitCode.Error, FormatExceptionMessage(ex));
             }
             catch (Exception ex)
             {
-                Log.ErrorException(ex, "Unhandled exception while starting application:\n{0}", FormatExceptionMessage(ex));
+                Log.FatalException(ex, "Unhandled exception while starting application:\n{0}", FormatExceptionMessage(ex));
                 Application.Exit(ExitCode.Error, FormatExceptionMessage(ex));
             }
             finally
@@ -108,7 +107,25 @@ namespace EventStore.Core
                 Log.Flush();
             }
 
+            Application.ExitSilent(_exitCode, "Normal exit.");
             return _exitCode;
+        }
+
+        private void CommitSuicideIfInBoehmOrOnBadVersionsOfMono(TOptions options)
+        {
+            if(!options.Force)
+            {
+                if(GC.MaxGeneration == 0)
+                {
+                    Application.Exit(3, "Appears that we are running in mono with boehm GC this is generally not a good idea, please run with sgen instead." + 
+                        "to run with sgen use mono --gc=sgen. If you really want to run with boehm GC you can use --force to override this error.");
+                }
+                if(OS.IsUnix && !OS.GetRuntimeVersion().StartsWith("3"))
+                {
+                    Application.Exit(4, "Appears that we are running in linux with a version 2 build of mono. This is generally not a good idea." +
+                        "We recommend running with 3.0 or higher (3.2 especially). If you really want to run with this version of mono use --force to override this error.");
+                }
+            }
         }
 
         private void Exit(int exitCode)
@@ -140,7 +157,7 @@ namespace EventStore.Core
                      + "{13,-25} {14}\n\n"
                      + "{15}",
                      "ES VERSION:", VersionInfo.Version, VersionInfo.Branch, VersionInfo.Hashtag, VersionInfo.Timestamp,
-                     "OS:", OS.IsLinux ? "Linux" : "Windows", Environment.OSVersion,
+                     "OS:", OS.OsFlavor, Environment.OSVersion,
                      "RUNTIME:", OS.GetRuntimeVersion(), Marshal.SizeOf(typeof(IntPtr)) * 8,
                      "GC:", GC.MaxGeneration == 0 ? "NON-GENERATION (PROBABLY BOEHM)" : string.Format("{0} GENERATIONS", GC.MaxGeneration + 1),
                      "LOGS:", LogManager.LogsDirectory,

@@ -121,6 +121,9 @@ namespace EventStore.Projections.Core.Services.Processing
                     }
 
                     break;
+                case ReadStreamResult.AccessDenied:
+                    SendNotAuthorized();
+                    return;
                 default:
                     throw new NotSupportedException(
                         string.Format("ReadEvents result code was not recognized. Code: {0}", message.Result));
@@ -167,8 +170,8 @@ namespace EventStore.Projections.Core.Services.Processing
         private Message CreateReadEventsMessage()
         {
             return new ClientMessage.ReadStreamEventsForward(
-                EventReaderCorrelationId, new SendToThisEnvelope(this), _streamName, _fromSequenceNumber,
-                _maxReadCount, _resolveLinkTos, null, ReadAs);
+                Guid.NewGuid(), EventReaderCorrelationId, new SendToThisEnvelope(this), _streamName, _fromSequenceNumber,
+                _maxReadCount, _resolveLinkTos, false, null, ReadAs);
         }
 
         private void DeliverSafeJoinPosition(long? safeJoinPosition)

@@ -90,9 +90,8 @@ namespace EventStore.ClientAPI
         /// </summary>
         /// <remarks>
         /// When appending events to a stream the <see cref="ExpectedVersion"/> choice can
-        /// make a very large difference in the observed behavior. If no stream exists
-        /// and ExpectedVersion.Any is used. A new stream will be implicitly created when appending
-        /// as an example.
+        /// make a very large difference in the observed behavior. For example, if no stream exists
+        /// and ExpectedVersion.Any is used, a new stream will be implicitly created when appending.
         /// 
         /// There are also differences in idempotency between different types of calls.
         /// If you specify an ExpectedVersion aside from ExpectedVersion.Any the Event Store
@@ -109,9 +108,8 @@ namespace EventStore.ClientAPI
         /// </summary>
         /// <remarks>
         /// When appending events to a stream the <see cref="ExpectedVersion"/> choice can
-        /// make a very large difference in the observed behavior. If no stream exists
-        /// and ExpectedVersion.Any is used. A new stream will be implicitly created when appending
-        /// as an example.
+        /// make a very large difference in the observed behavior. For example, if no stream exists
+        /// and ExpectedVersion.Any is used, a new stream will be implicitly created when appending.
         /// 
         /// There are also differences in idempotency between different types of calls.
         /// If you specify an ExpectedVersion aside from ExpectedVersion.Any the Event Store
@@ -129,9 +127,8 @@ namespace EventStore.ClientAPI
         /// </summary>
         /// <remarks>
         /// When appending events to a stream the <see cref="ExpectedVersion"/> choice can
-        /// make a very large difference in the observed behavior. If no stream exists
-        /// and ExpectedVersion.Any is used. A new stream will be implicitly created when appending
-        /// as an example.
+        /// make a very large difference in the observed behavior. For example, if no stream exists
+        /// and ExpectedVersion.Any is used, a new stream will be implicitly created when appending.
         /// 
         /// There are also differences in idempotency between different types of calls.
         /// If you specify an ExpectedVersion aside from ExpectedVersion.Any the Event Store
@@ -149,9 +146,8 @@ namespace EventStore.ClientAPI
         /// </summary>
         /// <remarks>
         /// When appending events to a stream the <see cref="ExpectedVersion"/> choice can
-        /// make a very large difference in the observed behavior. If no stream exists
-        /// and ExpectedVersion.Any is used. A new stream will be implicitly created when appending
-        /// as an example.
+        /// make a very large difference in the observed behavior. For example, if no stream exists
+        /// and ExpectedVersion.Any is used, a new stream will be implicitly created when appending.
         /// 
         /// There are also differences in idempotency between different types of calls.
         /// If you specify an ExpectedVersion aside from ExpectedVersion.Any the Event Store
@@ -169,9 +165,8 @@ namespace EventStore.ClientAPI
         /// </summary>
         /// <remarks>
         /// When appending events to a stream the <see cref="ExpectedVersion"/> choice can
-        /// make a very large difference in the observed behavior. If no stream exists
-        /// and ExpectedVersion.Any is used. A new stream will be implicitly created when appending
-        /// as an example.
+        /// make a very large difference in the observed behavior. For example, if no stream exists
+        /// and ExpectedVersion.Any is used, a new stream will be implicitly created when appending.
         /// 
         /// There are also differences in idempotency between different types of calls.
         /// If you specify an ExpectedVersion aside from ExpectedVersion.Any the Event Store
@@ -190,9 +185,8 @@ namespace EventStore.ClientAPI
         /// </summary>
         /// <remarks>
         /// When appending events to a stream the <see cref="ExpectedVersion"/> choice can
-        /// make a very large difference in the observed behavior. If no stream exists
-        /// and ExpectedVersion.Any is used. A new stream will be implicitly created when appending
-        /// as an example.
+        /// make a very large difference in the observed behavior. For example, if no stream exists
+        /// and ExpectedVersion.Any is used, a new stream will be implicitly created when appending.
         /// 
         /// There are also differences in idempotency between different types of calls.
         /// If you specify an ExpectedVersion aside from ExpectedVersion.Any the Event Store
@@ -246,6 +240,26 @@ namespace EventStore.ClientAPI
         /// <param name="userCredentials">The optional user credentials to perform operation with.</param>
         /// <returns><see cref="EventStoreTransaction"/> object.</returns>
         EventStoreTransaction ContinueTransaction(long transactionId, UserCredentials userCredentials = null);
+
+        /// <summary>
+        /// Reads count Events from an Event Stream forwards (e.g. oldest to newest) starting from position start
+        /// </summary>
+        /// <param name="stream">The stream to read from</param>
+        /// <param name="eventNumber">The event number to read, -1 (<see cref="StreamPosition">StreamPosition.End</see>) for reading latest event in the stream</param>
+        /// <param name="resolveLinkTos">Whether to resolve LinkTo events automatically</param>
+        /// <param name="userCredentials">The optional user credentials to perform operation with.</param>
+        /// <returns>A <see cref="EventReadResult"/> containing the results of the read operation</returns>
+        EventReadResult ReadEvent(string stream, int eventNumber, bool resolveLinkTos, UserCredentials userCredentials = null);
+
+        /// <summary>
+        /// Reads count Events from an Event Stream forwards (e.g. oldest to newest) starting from position start
+        /// </summary>
+        /// <param name="stream">The stream to read from</param>
+        /// <param name="eventNumber">The event number to read, -1 (<see cref="StreamPosition">StreamPosition.End</see>) for reading latest event in the stream</param>
+        /// <param name="resolveLinkTos">Whether to resolve LinkTo events automatically</param>
+        /// <param name="userCredentials">The optional user credentials to perform operation with.</param>
+        /// <returns>A <see cref="Task&lt;EventReadResult&gt;"/> containing the results of the read operation</returns>
+        Task<EventReadResult> ReadEventAsync(string stream, int eventNumber, bool resolveLinkTos, UserCredentials userCredentials = null);
 
         /// <summary>
         /// Reads count Events from an Event Stream forwards (e.g. oldest to newest) starting from position start
@@ -374,13 +388,13 @@ namespace EventStore.ClientAPI
                 Action<EventStoreCatchUpSubscription, SubscriptionDropReason, Exception> subscriptionDropped = null,
                 UserCredentials userCredentials = null);
 
-        void SetStreamMetadata(string stream, int expectedMetastreamVersion, Guid idempotencyId, StreamMetadata metadata, UserCredentials userCredentials = null);
+        void SetStreamMetadata(string stream, int expectedMetastreamVersion, StreamMetadata metadata, UserCredentials userCredentials = null);
         
-        Task SetStreamMetadataAsync(string stream, int expectedMetastreamVersion, Guid idempotencyId, StreamMetadata metadata, UserCredentials userCredentials = null);
+        Task SetStreamMetadataAsync(string stream, int expectedMetastreamVersion, StreamMetadata metadata, UserCredentials userCredentials = null);
         
-        void SetStreamMetadata(string stream, int expectedMetastreamVersion, Guid idempotencyId, byte[] metadata, UserCredentials userCredentials = null);
+        void SetStreamMetadata(string stream, int expectedMetastreamVersion, byte[] metadata, UserCredentials userCredentials = null);
         
-        Task SetStreamMetadataAsync(string stream, int expectedMetastreamVersion, Guid idempotencyId, byte[] metadata, UserCredentials userCredentials = null);
+        Task SetStreamMetadataAsync(string stream, int expectedMetastreamVersion, byte[] metadata, UserCredentials userCredentials = null);
         
         StreamMetadataResult GetStreamMetadata(string stream, UserCredentials userCredentials = null);
         
@@ -389,5 +403,9 @@ namespace EventStore.ClientAPI
         RawStreamMetadataResult GetStreamMetadataAsRawBytes(string stream, UserCredentials userCredentials = null);
         
         Task<RawStreamMetadataResult> GetStreamMetadataAsRawBytesAsync(string stream, UserCredentials userCredentials = null);
+
+        void SetSystemSettings(SystemSettings settings, UserCredentials userCredentials = null);
+        
+        Task SetSystemSettingsAsync(SystemSettings settings, UserCredentials userCredentials = null);
     }
 }

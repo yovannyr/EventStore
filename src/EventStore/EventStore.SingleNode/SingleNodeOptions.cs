@@ -48,13 +48,16 @@ namespace EventStore.SingleNode
         
         public int CachedChunks { get { return _helper.Get(() => CachedChunks); } }
         public long ChunksCacheSize { get { return _helper.Get(() => ChunksCacheSize); } }
+        public int MinFlushDelayMs { get { return _helper.Get(() => MinFlushDelayMs); } }
 
         public string DbPath { get { return _helper.Get(() => DbPath); } }
         public bool SkipDbVerify { get { return _helper.Get(() => SkipDbVerify); } }
-        public bool RunProjections { get { return _helper.Get(() => RunProjections); } }
+        public RunProjections RunProjections { get { return _helper.Get(() => RunProjections); } }
         public int ProjectionThreads { get { return _helper.Get(() => ProjectionThreads); } }
         public int WorkerThreads { get { return _helper.Get(() => WorkerThreads); } }
+
         public string[] HttpPrefixes { get { return _helper.Get(() => HttpPrefixes); } }
+        public bool EnableTrustedAuth { get { return _helper.Get(() => EnableTrustedAuth); } }
 
         public string CertificateStore { get { return _helper.Get(() => CertificateStore); } }
         public string CertificateName { get { return _helper.Get(() => CertificateName); } }
@@ -63,6 +66,8 @@ namespace EventStore.SingleNode
 
         public int PrepareTimeoutMs { get { return _helper.Get(() => PrepareTimeoutMs); } }
         public int CommitTimeoutMs { get { return _helper.Get(() => CommitTimeoutMs); } }
+
+        public bool Force { get { return _helper.Get(() => Force); } }
 
         private readonly OptsHelper _helper;
 
@@ -76,22 +81,25 @@ namespace EventStore.SingleNode
             _helper.RegisterArray(() => Configs, Opts.ConfigsCmd, Opts.ConfigsEnv, ",", Opts.ConfigsJson, Opts.ConfigsDefault, Opts.ConfigsDescr);
             _helper.RegisterArray(() => Defines, Opts.DefinesCmd, Opts.DefinesEnv, ",", Opts.DefinesJson, Opts.DefinesDefault, Opts.DefinesDescr, hidden: true);
 
-            _helper.RegisterRef(() => Ip, "i|ip=", "IP", "ip", IPAddress.Loopback, "The IP address to bind to.");
-            _helper.Register(() => TcpPort, "t|tcp-port=", "TCP_PORT", "tcpPort", 1113, "The port to run the TCP server on.");
-            _helper.Register(() => SecureTcpPort, "st|sec-tcp-port|secure-tcp-port=", "SEC_TCP_PORT", "secureTcpPort", 0, "The port to run the secure TCP server on.");
-            _helper.Register(() => HttpPort, "h|http-port=", "HTTP_PORT", "httpPort", 2113, "The port to run the HTTP server on.");
-
+            _helper.RegisterRef(() => Ip, Opts.IpCmd, Opts.IpEnv, Opts.IpJson, Opts.IpDefault, Opts.IpDescr);
+            _helper.Register(() => TcpPort, Opts.TcpPortCmd, Opts.TcpPortEnv, Opts.TcpPortJson, Opts.TcpPortDefault, Opts.TcpPortDescr);
+            _helper.Register(() => SecureTcpPort, Opts.SecureTcpPortCmd, Opts.SecureTcpPortEnv, Opts.SecureTcpPortJson, Opts.SecureTcpPortDefault, Opts.SecureTcpPortDescr);
+            _helper.Register(() => HttpPort, Opts.HttpPortCmd, Opts.HttpPortEnv, Opts.HttpPortJson, Opts.HttpPortDefault, Opts.HttpPortDescr);
+            
             _helper.Register(() => StatsPeriodSec, Opts.StatsPeriodCmd, Opts.StatsPeriodEnv, Opts.StatsPeriodJson, Opts.StatsPeriodDefault, Opts.StatsPeriodDescr);
             
             _helper.Register(() => CachedChunks, Opts.CachedChunksCmd, Opts.CachedChunksEnv, Opts.CachedChunksJson, Opts.CachedChunksDefault, Opts.CachedChunksDescr, hidden: true);
             _helper.Register(() => ChunksCacheSize, Opts.ChunksCacheSizeCmd, Opts.ChunksCacheSizeEnv, Opts.ChunksCacheSizeJson, Opts.ChunksCacheSizeDefault, Opts.ChunksCacheSizeDescr);
+            _helper.Register(() => MinFlushDelayMs, Opts.MinFlushDelayMsCmd, Opts.MinFlushDelayMsEnv, Opts.MinFlushDelayMsJson, Opts.MinFlushDelayMsDefault, Opts.MinFlushDelayMsDescr);
             
             _helper.RegisterRef(() => DbPath, Opts.DbPathCmd, Opts.DbPathEnv, Opts.DbPathJson, Opts.DbPathDefault, Opts.DbPathDescr);
             _helper.Register(() => SkipDbVerify, Opts.SkipDbVerifyCmd, Opts.SkipDbVerifyEnv, Opts.SkipDbVerifyJson, Opts.SkipDbVerifyDefault, Opts.SkipDbVerifyDescr);
             _helper.Register(() => RunProjections, Opts.RunProjectionsCmd, Opts.RunProjectionsEnv, Opts.RunProjectionsJson, Opts.RunProjectionsDefault, Opts.RunProjectionsDescr);
             _helper.Register(() => ProjectionThreads, Opts.ProjectionThreadsCmd, Opts.ProjectionThreadsEnv, Opts.ProjectionThreadsJson, Opts.ProjectionThreadsDefault, Opts.ProjectionThreadsDescr);
             _helper.Register(() => WorkerThreads, Opts.WorkerThreadsCmd, Opts.WorkerThreadsEnv, Opts.WorkerThreadsJson, Opts.WorkerThreadsDefault, Opts.WorkerThreadsDescr);
+
             _helper.RegisterArray(() => HttpPrefixes, Opts.HttpPrefixesCmd, Opts.HttpPrefixesEnv, ",", Opts.HttpPrefixesJson, Opts.HttpPrefixesDefault, Opts.HttpPrefixesDescr);
+            _helper.Register(() => EnableTrustedAuth, Opts.EnableTrustedAuthCmd, Opts.EnableTrustedAuthEnv, Opts.EnableTrustedAuthJson, Opts.EnableTrustedAuthDefault, Opts.EnableTrustedAuthDescr);
 
             _helper.RegisterRef(() => CertificateStore, Opts.CertificateStoreCmd, Opts.CertificateStoreEnv, Opts.CertificateStoreJson, Opts.CertificateStoreDefault, Opts.CertificateStoreDescr);
             _helper.RegisterRef(() => CertificateName, Opts.CertificateNameCmd, Opts.CertificateNameEnv, Opts.CertificateNameJson, Opts.CertificateNameDefault, Opts.CertificateNameDescr);
@@ -100,6 +108,7 @@ namespace EventStore.SingleNode
 
             _helper.Register(() => PrepareTimeoutMs, Opts.PrepareTimeoutMsCmd, Opts.PrepareTimeoutMsEnv, Opts.PrepareTimeoutMsJson, Opts.PrepareTimeoutMsDefault, Opts.PrepareTimeoutMsDescr);
             _helper.Register(() => CommitTimeoutMs, Opts.CommitTimeoutMsCmd, Opts.CommitTimeoutMsEnv, Opts.CommitTimeoutMsJson, Opts.CommitTimeoutMsDefault, Opts.CommitTimeoutMsDescr);
+            _helper.Register(() => Force, Opts.ForceCmd, Opts.ForceEnv, Opts.ForceJson, false, "Force usage on non-recommended environments such as Boehm GC");
         }
 
         public void Parse(params string[] args)

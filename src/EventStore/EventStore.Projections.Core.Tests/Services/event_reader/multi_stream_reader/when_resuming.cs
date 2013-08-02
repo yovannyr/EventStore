@@ -52,7 +52,7 @@ namespace EventStore.Projections.Core.Tests.Services.event_reader.multi_stream_r
         private Dictionary<string, int> _ab12Tag;
 
         [SetUp]
-        public void When()
+        public new void When()
         {
             _ab12Tag = new Dictionary<string, int> {{"a", 1}, {"b", 2}};
             _abStreams = new[] {"a", "b"};
@@ -112,7 +112,7 @@ namespace EventStore.Projections.Core.Tests.Services.event_reader.multi_stream_r
                             DateTime.UtcNow,
                             PrepareFlags.SingleWrite | PrepareFlags.TransactionBegin | PrepareFlags.TransactionEnd,
                             "event_type", new byte[0], new byte[0]))
-                        }, "", 2, 4, false, 100));
+                        }, null, false, "", 2, 4, false, 100));
         }
     }
 }

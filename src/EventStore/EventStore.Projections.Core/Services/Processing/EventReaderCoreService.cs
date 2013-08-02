@@ -34,6 +34,7 @@ using EventStore.Core.Data;
 using EventStore.Core.Services.TimerService;
 using EventStore.Core.Services.UserManagement;
 using EventStore.Core.TransactionLog.Checkpoint;
+using EventStore.Core.Util;
 using EventStore.Projections.Core.Messages;
 
 namespace EventStore.Projections.Core.Services.Processing
@@ -46,7 +47,8 @@ namespace EventStore.Projections.Core.Services.Processing
         IHandle<ReaderSubscriptionManagement.Pause>, 
         IHandle<ReaderSubscriptionManagement.Resume>, 
         IHandle<ReaderSubscriptionMessage.CommittedEventDistributed>, 
-        IHandle<ReaderSubscriptionMessage.EventReaderIdle>, 
+        IHandle<ReaderSubscriptionMessage.EventReaderIdle>,
+        IHandle<ReaderSubscriptionMessage.EventReaderNotAuthorized>,
         IHandle<ReaderSubscriptionMessage.EventReaderEof>, 
         IHandle<ReaderCoreServiceMessage.ReaderTick>
     {
@@ -185,6 +187,19 @@ namespace EventStore.Projections.Core.Services.Processing
         }
 
         public void Handle(ReaderSubscriptionMessage.EventReaderEof message)
+        {
+            Guid projectionId;
+            if (_stopped)
+                return;
+            if (!_eventReaderSubscriptions.TryGetValue(message.CorrelationId, out projectionId))
+                return; // unsubscribed
+            _subscriptions[projectionId].Handle(message);
+
+            _pausedSubscriptions.Add(projectionId); // it is actually disposed -- workaround
+            Handle(new ReaderSubscriptionManagement.Unsubscribe(projectionId));
+        }
+
+        public void Handle(ReaderSubscriptionMessage.EventReaderNotAuthorized message)
         {
             Guid projectionId;
             if (_stopped)

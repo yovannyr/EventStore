@@ -41,7 +41,7 @@ namespace EventStore.Projections.Core.Tests.Services.projections_manager.managed
     [TestFixture]
     public class when_loading_a_managed_projection_state : TestFixtureWithExistingEvents
     {
-        private ITimeProvider _timeProvider;
+        private new ITimeProvider _timeProvider;
 
         private ManagedProjection _mp;
 
@@ -49,7 +49,7 @@ namespace EventStore.Projections.Core.Tests.Services.projections_manager.managed
         {
             _timeProvider = new FakeTimeProvider();
             _mp = new ManagedProjection(
-                _bus, Guid.NewGuid(), 1, "name", null, _writeDispatcher, _readDispatcher, _bus, _bus, _handlerFactory,
+                _bus, Guid.NewGuid(), 1, "name", true, null, _writeDispatcher, _readDispatcher, _bus, _bus, _handlerFactory,
                 _timeProvider);
         }
 

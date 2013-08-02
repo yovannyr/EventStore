@@ -38,21 +38,23 @@ namespace EventStore.ClientAPI.ClientOperations
 {
     internal class AppendToStreamOperation : OperationBase<object, ClientMessage.WriteEventsCompleted>
     {
-        private readonly bool _forward;
+        private readonly bool _requireMaster;
         private readonly string _stream;
         private readonly int _expectedVersion;
         private readonly IEnumerable<EventData> _events;
 
+        private bool _wasCommitTimeout;
+
         public AppendToStreamOperation(ILogger log, 
                                        TaskCompletionSource<object> source,
-                                       bool forward,
+                                       bool requireMaster,
                                        string stream,
                                        int expectedVersion,
                                        IEnumerable<EventData> events,
                                        UserCredentials userCredentials)
             : base(log, source, TcpCommand.WriteEvents, TcpCommand.WriteEventsCompleted, userCredentials)
         {
-            _forward = forward;
+            _requireMaster = requireMaster;
             _stream = stream;
             _expectedVersion = expectedVersion;
             _events = events;
@@ -60,8 +62,8 @@ namespace EventStore.ClientAPI.ClientOperations
 
         protected override object CreateRequestDto()
         {
-            var dtos = _events.Select(x => new ClientMessage.NewEvent(x.EventId.ToByteArray(), x.Type, x.IsJson, x.Data, x.Metadata)).ToArray();
-            return new ClientMessage.WriteEvents(_stream, _expectedVersion, dtos, _forward);
+            var dtos = _events.Select(x => new ClientMessage.NewEvent(x.EventId.ToByteArray(), x.Type, x.IsJson ? 1 : 0, 0, x.Data, x.Metadata)).ToArray();
+            return new ClientMessage.WriteEvents(_stream, _expectedVersion, dtos, _requireMaster);
         }
 
         protected override InspectionResult InspectResponse(ClientMessage.WriteEventsCompleted response)
@@ -69,11 +71,15 @@ namespace EventStore.ClientAPI.ClientOperations
             switch (response.Result)
             {
                 case ClientMessage.OperationResult.Success:
+                    if (_wasCommitTimeout)
+                        Log.Debug("IDEMPOTENT WRITE SUCCEEDED FOR {0}.", this);
                     Succeed();
                     return new InspectionResult(InspectionDecision.EndOperation);
                 case ClientMessage.OperationResult.PrepareTimeout:
-                case ClientMessage.OperationResult.CommitTimeout:
                 case ClientMessage.OperationResult.ForwardTimeout:
+                    return new InspectionResult(InspectionDecision.Retry);
+                case ClientMessage.OperationResult.CommitTimeout:
+                    _wasCommitTimeout = true;
                     return new InspectionResult(InspectionDecision.Retry);
                 case ClientMessage.OperationResult.WrongExpectedVersion:
                     var err = string.Format("Append failed due to WrongExpectedVersion. Stream: {0}, Expected version: {1}", _stream, _expectedVersion);

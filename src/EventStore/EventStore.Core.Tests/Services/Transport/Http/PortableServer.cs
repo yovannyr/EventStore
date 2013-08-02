@@ -83,7 +83,7 @@ namespace EventStore.Core.Tests.Services.Transport.Http
                 var authenticationProviders = new AuthenticationProvider[] {new AnonymousAuthenticationProvider()};
 
                 _service = new HttpService(ServiceAccessibility.Private, _bus, new NaiveUriRouter(),
-                                           _multiQueuedHandler, false, _serverEndPoint.ToHttpUrl());
+                                           _multiQueuedHandler, _serverEndPoint.ToHttpUrl());
                 HttpService.CreateAndSubscribePipeline(pipelineBus, authenticationProviders);
                 _client = new HttpAsyncClient();
             }
@@ -117,6 +117,7 @@ namespace EventStore.Core.Tests.Services.Transport.Http
             var error = string.Empty;
 
             _client.Get(requestUrl,
+                        TimeSpan.FromMilliseconds(10000),
                         response =>
                             {
                                 success = verifyResponse(response);

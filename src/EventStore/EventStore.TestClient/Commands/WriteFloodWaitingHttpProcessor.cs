@@ -110,8 +110,9 @@ namespace EventStore.TestClient.Commands
                                                                                      "METADATA" + new string('$', 100))};
                         var request = Codec.Xml.To(write);
                         client.Post(url, 
-                                    request, 
+                                    request,
                                     Codec.Xml.ContentType,
+                                    TimeSpan.FromMilliseconds(10000),
                                     succHandler, 
                                     exc => 
                                     {

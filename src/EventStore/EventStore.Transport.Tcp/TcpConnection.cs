@@ -31,7 +31,6 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
-using System.Reflection;
 using System.Threading;
 using EventStore.BufferManagement;
 using EventStore.Common.Locks;
@@ -53,6 +52,7 @@ namespace EventStore.Transport.Tcp
         public static ITcpConnection CreateConnectingTcpConnection(Guid connectionId, 
                                                                    IPEndPoint remoteEndPoint, 
                                                                    TcpClientConnector connector, 
+                                                                   TimeSpan connectionTimeout,
                                                                    Action<ITcpConnection> onConnectionEstablished, 
                                                                    Action<ITcpConnection, SocketError> onConnectionFailed,
                                                                    bool verbose)
@@ -70,25 +70,23 @@ namespace EventStore.Transport.Tcp
                                   {
                                       if (onConnectionFailed != null)
                                           onConnectionFailed(connection, socketError);
-                                  });
+                                  }, connection, connectionTimeout);
 // ReSharper restore ImplicitlyCapturedClosure
             return connection;
         }
 
-        public static ITcpConnection CreateAcceptedTcpConnection(Guid connectionId, IPEndPoint effectiveEndPoint, Socket socket, bool verbose)
+        public static ITcpConnection CreateAcceptedTcpConnection(Guid connectionId, IPEndPoint remoteEndPoint, Socket socket, bool verbose)
         {
-            var connection = new TcpConnection(connectionId, effectiveEndPoint, verbose);
+            var connection = new TcpConnection(connectionId, remoteEndPoint, verbose);
             connection.InitSocket(socket);
             return connection;
         }
 
         public event Action<ITcpConnection, SocketError> ConnectionClosed;
         public Guid ConnectionId { get { return _connectionId; } }
-        public IPEndPoint EffectiveEndPoint { get { return _effectiveEndPoint; } }
         public int SendQueueSize { get { return _sendQueue.Count; } }
 
         private readonly Guid _connectionId;
-        private readonly IPEndPoint _effectiveEndPoint;
         private readonly bool _verbose;
 
         private Socket _socket;
@@ -106,19 +104,17 @@ namespace EventStore.Transport.Tcp
 
         private Action<ITcpConnection, IEnumerable<ArraySegment<byte>>> _receiveCallback;
 
-        private TcpConnection(Guid connectionId, IPEndPoint effectiveEndPoint, bool verbose)
+        private TcpConnection(Guid connectionId, IPEndPoint remoteEndPoint, bool verbose): base(remoteEndPoint)
         {
             Ensure.NotEmptyGuid(connectionId, "connectionId");
-            Ensure.NotNull(effectiveEndPoint, "effectiveEndPoint");
 
             _connectionId = connectionId;
-            _effectiveEndPoint = effectiveEndPoint;
             _verbose = verbose;
         }
 
         private void InitSocket(Socket socket)
         {
-            InitSocket(socket, _effectiveEndPoint);
+            InitConnectionBase(socket);
             using (_sendingLock.Acquire()) 
             {
                 _socket = socket;
@@ -213,14 +209,17 @@ namespace EventStore.Transport.Tcp
             else
             {
                 NotifySendCompleted(socketArgs.Count);
-                using (_sendingLock.Acquire())
-                {
-                    _isSending = false;
-                }
+
                 if (_closed != 0)
                     ReturnSendingSocketArgs();
                 else
+                {
+                    using (_sendingLock.Acquire())
+                    {
+                        _isSending = false;
+                    }
                     TrySend();
+                }
             }
         }
 
@@ -356,9 +355,9 @@ namespace EventStore.Transport.Tcp
 
             if (_verbose)
             {
-                Log.Info("[{0:HH:mm:ss.fff}: {1}]:\nConnection ID: {2:B}\nReceived bytes: {3}, Sent bytes: {4}\n"
-                         + "Send calls: {5}, callbacks: {6}\nReceive calls: {7}, callbacks: {8}\nClose reason: [{9}] {10}\n",
-                         DateTime.UtcNow, EffectiveEndPoint, _connectionId,
+                Log.Info("[{0:HH:mm:ss.fff}: N{1}, L{2}, {3:B}]:\nReceived bytes: {4}, Sent bytes: {5}\n"
+                         + "Send calls: {6}, callbacks: {7}\nReceive calls: {8}, callbacks: {9}\nClose reason: [{10}] {11}\n",
+                         DateTime.UtcNow, RemoteEndPoint, LocalEndPoint, _connectionId,
                          TotalBytesReceived, TotalBytesSent,
                          SendCalls, SendCallbacks,
                          ReceiveCalls, ReceiveCallbacks,
@@ -414,7 +413,7 @@ namespace EventStore.Transport.Tcp
         
         public override string ToString()
         {
-            return EffectiveEndPoint.ToString();
+            return RemoteEndPoint.ToString();
         }
     }
 }

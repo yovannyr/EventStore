@@ -41,6 +41,7 @@ namespace EventStore.ClientAPI
         private int _managerExternalHttpPort = Consts.DefaultClusterManagerExternalHttpPort;
 
         private IPAddress[] _fakeDnsEntries;
+        private TimeSpan _gossipTimeout = TimeSpan.FromSeconds(1);
 
         internal ClusterSettingsBuilder()
         {
@@ -58,6 +59,12 @@ namespace EventStore.ClientAPI
             if (maxDiscoverAttempts < -1)
                 throw new ArgumentOutOfRangeException("maxDiscoverAttempts", string.Format("maxDiscoverAttempts value is out of range: {0}. Allowed range: [-1, infinity].", maxDiscoverAttempts));
             _maxDiscoverAttempts = maxDiscoverAttempts;
+            return this;
+        }
+
+        public ClusterSettingsBuilder WithGossipTimeoutOf(TimeSpan timeout)
+        {
+            _gossipTimeout = timeout;
             return this;
         }
 
@@ -81,7 +88,8 @@ namespace EventStore.ClientAPI
             return new ClusterSettings(builder._clusterDns,
                                        builder._maxDiscoverAttempts,
                                        builder._managerExternalHttpPort,
-                                       builder._fakeDnsEntries);
+                                       builder._fakeDnsEntries,
+                                       builder._gossipTimeout);
         }
     }
 }

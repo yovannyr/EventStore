@@ -78,25 +78,10 @@ namespace EventStore.Transport.Http.EntityManagement
             _requestedUrl = httpEntity.RequestedUrl;
         }
 
-        public ICodec RequestCodec
-        {
-            get { return _requestCodec; }
-        }
-
-        public ICodec ResponseCodec
-        {
-            get { return _responseCodec; }
-        }
-
-        public Uri RequestedUrl
-        {
-            get { return _requestedUrl; }
-        }
-
-        public IPrincipal User
-        {
-            get { return HttpEntity.User; }
-        }
+        public ICodec RequestCodec { get { return _requestCodec; } }
+        public ICodec ResponseCodec { get { return _responseCodec; } }
+        public Uri RequestedUrl { get { return _requestedUrl; } }
+        public IPrincipal User { get { return HttpEntity.User; } }
 
         private void SetResponseCode(int code)
         {
@@ -104,13 +89,13 @@ namespace EventStore.Transport.Http.EntityManagement
             {
                 HttpEntity.Response.StatusCode = code;
             }
-            catch (ObjectDisposedException e)
+            catch (ObjectDisposedException)
             {
-                Log.InfoException(e, "Attempt to set http status code on disposed response object, ignoring...");
+                // ignore
             }
             catch (ProtocolViolationException e)
             {
-                Log.InfoException(e, "Attempt to set invalid http status code occurred.");
+                Log.ErrorException(e, "Attempt to set invalid http status code occurred.");
             }
         }
 
@@ -120,13 +105,13 @@ namespace EventStore.Transport.Http.EntityManagement
             {
                 HttpEntity.Response.StatusDescription = desc;
             }
-            catch (ObjectDisposedException e)
+            catch (ObjectDisposedException)
             {
-                Log.InfoException(e, "Attempt to set http status description on disposed response object, ignoring...");
+                // ignore
             }
             catch (ArgumentException e)
             {
-                Log.InfoException(e, "Description string '{0}' did not pass validation. Status description was not set.", desc);
+                Log.ErrorException(e, "Description string '{0}' did not pass validation. Status description was not set.", desc);
             }
         }
 
@@ -134,20 +119,19 @@ namespace EventStore.Transport.Http.EntityManagement
         {
             try
             {
-                HttpEntity.Response.ContentType = contentType
-                                                  + (encoding != null ? ("; charset: " + encoding.WebName) : "");
+                HttpEntity.Response.ContentType = contentType + (encoding != null ? ("; charset: " + encoding.WebName) : "");
             }
-            catch (ObjectDisposedException e)
+            catch (ObjectDisposedException)
             {
-                Log.InfoException(e, "Attempt to set response content type on disposed response object, ignoring...");
+                // ignore
             }
             catch (InvalidOperationException e)
             {
-                Log.InfoException(e, "Error during setting content type on HTTP response.");
+                Log.Debug("Error during setting content type on HTTP response: {0}.", e.Message);
             }
             catch (ArgumentOutOfRangeException e)
             {
-                Log.InfoException(e, "Invalid response type.");
+                Log.ErrorException(e, "Invalid response type.");
             }
         }
 
@@ -157,17 +141,17 @@ namespace EventStore.Transport.Http.EntityManagement
             {
                 HttpEntity.Response.ContentLength64 = length;
             }
-            catch (ObjectDisposedException e)
+            catch (ObjectDisposedException)
             {
-                Log.InfoException(e, "Attempt to set content length on disposed response object, ignoring...");
+                // ignore
             }
             catch (InvalidOperationException e)
             {
-                Log.InfoException(e, "Error during setting content length on HTTP response.");
+                Log.Debug("Error during setting content length on HTTP response: {0}.", e.Message);
             }
             catch (ArgumentOutOfRangeException e)
             {
-                Log.InfoException(e, "Attempt to set invalid value ('{0}') as content length.", length);
+                Log.ErrorException(e, "Attempt to set invalid value '{0}' as content length.", length);
             }
         }
 
@@ -178,12 +162,16 @@ namespace EventStore.Transport.Http.EntityManagement
                 HttpEntity.Response.AddHeader("Access-Control-Allow-Methods", string.Join(", ", _allowedMethods));
                 HttpEntity.Response.AddHeader("Access-Control-Allow-Headers", "Content-Type, X-Requested-With, X-PINGOTHER");
                 HttpEntity.Response.AddHeader("Access-Control-Allow-Origin", "*");
-				if (HttpEntity.Response.StatusCode == HttpStatusCode.Unauthorized) 
-					HttpEntity.Response.AddHeader("WWW-Authenticate", "Basic realm=\"ES\"");
+                if (HttpEntity.Response.StatusCode == HttpStatusCode.Unauthorized)
+                    HttpEntity.Response.AddHeader("WWW-Authenticate", "Basic realm=\"ES\"");
+            }
+            catch (ObjectDisposedException)
+            {
+                // ignore
             }
             catch (Exception e)
             {
-                Log.InfoException(e, "Failed to set required response headers.");
+                Log.Debug("Failed to set required response headers: {0}.", e.Message);
             }
         }
 
@@ -196,9 +184,13 @@ namespace EventStore.Transport.Http.EntityManagement
                     HttpEntity.Response.AddHeader(kvp.Key, kvp.Value);
                 }
             }
+            catch (ObjectDisposedException)
+            {
+                // ignore
+            }
             catch (Exception e)
             {
-                Log.InfoException(e, "Failed to set additional response headers.");
+                Log.Debug("Failed to set additional response headers: {0}.", e.Message);
             }
         }
 
@@ -246,7 +238,7 @@ namespace EventStore.Transport.Http.EntityManagement
         {
             IOStreams.SafelyDispose(_currentOutputStream);
             _currentOutputStream = null;
-            CloseConnection(e => Log.ErrorException(e, message));
+            CloseConnection(e => Log.Debug(message + "\nException: " + e.Message));
         }
 
         public void EndReply()
@@ -289,29 +281,16 @@ namespace EventStore.Transport.Http.EntityManagement
             {
                 HttpEntity.Response.StatusCode = (int)response.StatusCode;
                 HttpEntity.Response.StatusDescription = response.StatusDescription;
-
                 HttpEntity.Response.ContentType = response.ContentType;
                 HttpEntity.Response.ContentLength64 = response.ContentLength;
-
                 foreach (var headerKey in response.Headers.AllKeys)
                 {
                     switch (headerKey)
                     {
-                        case "Accept":
-                        case "Connection":
-                        case "Content-Type":
-                        case "Content-Length":
-                        case "Date":
-                        case "Expect":
-                        case "Host":
-                        case "If-Modified-Since":
-                        case "Proxy-Connection":
-                        case "Range":
-                        case "Referer":
-                        case "Transfer-Encoding":
-                        case "User-Agent":
-                            // Restricted
-                            break;
+                        case "Content-Length": break;
+                        case "Keep-Alive": break;
+                        case "Transfer-Encoding": break;
+                        case "WWW-Authenticate": HttpEntity.Response.AddHeader(headerKey, response.Headers[headerKey]); break;
 
                         default:
                             HttpEntity.Response.Headers.Add(headerKey, response.Headers[headerKey]);
@@ -326,7 +305,7 @@ namespace EventStore.Transport.Http.EntityManagement
                         copier =>
                         {
                             if (copier.Error != null)
-                                Log.ErrorException(copier.Error, "Error copying forwarded response stream for '{0}'", RequestedUrl);
+                                Log.Debug("Error copying forwarded response stream for '{0}': {1}.", RequestedUrl, copier.Error.Message);
                             Helper.EatException(response.Close);
                             Helper.EatException(HttpEntity.Response.Close);
                         }).Start();
@@ -339,7 +318,7 @@ namespace EventStore.Transport.Http.EntityManagement
             }
             catch (Exception e)
             {
-                Log.InfoException(e, "Failed to set up forwarded response parameters for '{0}'.", RequestedUrl);
+                Log.ErrorException(e, "Failed to set up forwarded response parameters for '{0}'.", RequestedUrl);
             }
         }
 
@@ -378,7 +357,7 @@ namespace EventStore.Transport.Http.EntityManagement
             if (copier.Error != null)
             {
                 state.Dispose();
-                CloseConnection(exc => Log.ErrorException(exc, "Close connection error (after crash in read request)"));
+                CloseConnection(exc => Log.Debug("Close connection error (after crash in read request): {0}", exc.Message));
 
                 state.OnError(copier.Error);
                 return;

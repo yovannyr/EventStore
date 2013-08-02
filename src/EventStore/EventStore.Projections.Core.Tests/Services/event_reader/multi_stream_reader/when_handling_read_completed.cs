@@ -61,7 +61,7 @@ namespace EventStore.Projections.Core.Tests.Services.event_reader.multi_stream_r
         private Dictionary<string, int> _ab12Tag;
 
         [SetUp]
-        public void When()
+        public new void When()
         {
             _ab12Tag = new Dictionary<string, int> { { "a", 1 }, { "b", 2 } };
             _abStreams = new[] { "a", "b" };
@@ -88,7 +88,7 @@ namespace EventStore.Projections.Core.Tests.Services.event_reader.multi_stream_r
                                 2, 100, Guid.NewGuid(), _secondEventId, 100, 0, "a", ExpectedVersion.Any, DateTime.UtcNow,
                                 PrepareFlags.SingleWrite | PrepareFlags.TransactionBegin | PrepareFlags.TransactionEnd,
                                 "event_type2", new byte[] {3}, new byte[] {4}), null)
-                    }, "", 3, 4, false, 200));
+                    }, null, false, "", 3, 4, false, 200));
         }
 
         [Test, ExpectedException(typeof (InvalidOperationException))]
@@ -135,7 +135,7 @@ namespace EventStore.Projections.Core.Tests.Services.event_reader.multi_stream_r
                         2, 50, Guid.NewGuid(), Guid.NewGuid(), 50, 0, "a", ExpectedVersion.Any, DateTime.UtcNow,
                         PrepareFlags.SingleWrite | PrepareFlags.TransactionBegin | PrepareFlags.TransactionEnd,
                         "event_type", new byte[0], new byte[0]), null)
-                    }, "", 3, 4, false, 100));
+                    }, null, false, "", 3, 4, false, 100));
         }
 
     }

@@ -29,14 +29,12 @@
 using System;
 using System.Collections.Generic;
 using System.Data.SqlClient;
-using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 using EventStore.ClientAPI.ClientOperations;
 using EventStore.ClientAPI.Common;
 using EventStore.ClientAPI.Common.Utils;
 using EventStore.ClientAPI.Core;
-using EventStore.ClientAPI.Messages;
 using EventStore.ClientAPI.SystemData;
 
 namespace EventStore.ClientAPI
@@ -113,7 +111,7 @@ namespace EventStore.ClientAPI
             Ensure.NotNullOrEmpty(stream, "stream");
 
             var source = new TaskCompletionSource<object>();
-            EnqueueOperation(new DeleteStreamOperation(_settings.Log, source, _settings.AllowForwarding, 
+            EnqueueOperation(new DeleteStreamOperation(_settings.Log, source, _settings.RequireMaster, 
                                                        stream, expectedVersion, userCredentials));
             return source.Task;
         }
@@ -162,7 +160,7 @@ namespace EventStore.ClientAPI
             Ensure.NotNull(events, "events");
 
             var source = new TaskCompletionSource<object>();
-            EnqueueOperation(new AppendToStreamOperation(_settings.Log, source, _settings.AllowForwarding, 
+            EnqueueOperation(new AppendToStreamOperation(_settings.Log, source, _settings.RequireMaster, 
                                                          stream, expectedVersion, events, userCredentials));
             return source.Task;
 // ReSharper restore PossibleMultipleEnumeration
@@ -179,7 +177,7 @@ namespace EventStore.ClientAPI
             Ensure.NotNullOrEmpty(stream, "stream");
 
             var source = new TaskCompletionSource<EventStoreTransaction>();
-            EnqueueOperation(new StartTransactionOperation(_settings.Log, source, _settings.AllowForwarding, 
+            EnqueueOperation(new StartTransactionOperation(_settings.Log, source, _settings.RequireMaster, 
                                                            stream, expectedVersion, this, userCredentials));
             return source.Task;
         }
@@ -190,29 +188,44 @@ namespace EventStore.ClientAPI
             return new EventStoreTransaction(transactionId, userCredentials, this);
         }
 
-        Task IEventStoreTransactionConnection.TransactionalWriteAsync(EventStoreTransaction transaction, IEnumerable<EventData> events, UserCredentials userCredentials = null)
+        Task IEventStoreTransactionConnection.TransactionalWriteAsync(EventStoreTransaction transaction, IEnumerable<EventData> events, UserCredentials userCredentials)
         {
 // ReSharper disable PossibleMultipleEnumeration
             Ensure.NotNull(transaction, "transaction");
             Ensure.NotNull(events, "events");
 
             var source = new TaskCompletionSource<object>();
-            EnqueueOperation(new TransactionalWriteOperation(_settings.Log, source, _settings.AllowForwarding, 
+            EnqueueOperation(new TransactionalWriteOperation(_settings.Log, source, _settings.RequireMaster, 
                                                              transaction.TransactionId, events, userCredentials));
             return source.Task;
 // ReSharper restore PossibleMultipleEnumeration
         }
 
-        Task IEventStoreTransactionConnection.CommitTransactionAsync(EventStoreTransaction transaction, UserCredentials userCredentials = null)
+        Task IEventStoreTransactionConnection.CommitTransactionAsync(EventStoreTransaction transaction, UserCredentials userCredentials)
         {
             Ensure.NotNull(transaction, "transaction");
 
             var source = new TaskCompletionSource<object>();
-            EnqueueOperation(new CommitTransactionOperation(_settings.Log, source, _settings.AllowForwarding, 
+            EnqueueOperation(new CommitTransactionOperation(_settings.Log, source, _settings.RequireMaster, 
                                                             transaction.TransactionId, userCredentials));
             return source.Task;
         }
 
+        public EventReadResult ReadEvent(string stream, int eventNumber, bool resolveLinkTos, UserCredentials userCredentials = null)
+        {
+            return ReadEventAsync(stream, eventNumber, resolveLinkTos, userCredentials).Result;
+        }
+
+        public Task<EventReadResult> ReadEventAsync(string stream, int eventNumber, bool resolveLinkTos, UserCredentials userCredentials = null)
+        {
+            Ensure.NotNullOrEmpty(stream, "stream");
+            if (eventNumber < -1) throw new ArgumentOutOfRangeException("eventNumber");
+            var source = new TaskCompletionSource<EventReadResult>();
+            var operation = new ReadEventOperation(_settings.Log, source, stream, eventNumber, resolveLinkTos,
+                                                   _settings.RequireMaster, userCredentials);
+            EnqueueOperation(operation);
+            return source.Task;
+        }
 
         public StreamEventsSlice ReadStreamEventsForward(string stream, int start, int count, bool resolveLinkTos, UserCredentials userCredentials = null)
         {
@@ -226,7 +239,9 @@ namespace EventStore.ClientAPI
             Ensure.Positive(count, "count");
 
             var source = new TaskCompletionSource<StreamEventsSlice>();
-            EnqueueOperation(new ReadStreamEventsForwardOperation(_settings.Log, source, stream, start, count, resolveLinkTos, userCredentials));
+            var operation = new ReadStreamEventsForwardOperation(_settings.Log, source, stream, start, count,
+                                                                 resolveLinkTos, _settings.RequireMaster, userCredentials);
+            EnqueueOperation(operation);
             return source.Task;
         }
 
@@ -241,7 +256,9 @@ namespace EventStore.ClientAPI
             Ensure.Positive(count, "count");
 
             var source = new TaskCompletionSource<StreamEventsSlice>();
-            EnqueueOperation(new ReadStreamEventsBackwardOperation(_settings.Log, source, stream, start, count, resolveLinkTos, userCredentials));
+            var operation = new ReadStreamEventsBackwardOperation(_settings.Log, source, stream, start, count,
+                                                                  resolveLinkTos, _settings.RequireMaster, userCredentials);
+            EnqueueOperation(operation);
             return source.Task;
         }
 
@@ -255,7 +272,9 @@ namespace EventStore.ClientAPI
             Ensure.Positive(maxCount, "maxCount");
 
             var source = new TaskCompletionSource<AllEventsSlice>();
-            EnqueueOperation(new ReadAllEventsForwardOperation(_settings.Log, source, position, maxCount, resolveLinkTos, userCredentials));
+            var operation = new ReadAllEventsForwardOperation(_settings.Log, source, position, maxCount,
+                                                              resolveLinkTos, _settings.RequireMaster, userCredentials);
+            EnqueueOperation(operation);
             return source.Task;
         }
 
@@ -269,7 +288,9 @@ namespace EventStore.ClientAPI
             Ensure.Positive(maxCount, "maxCount");
 
             var source = new TaskCompletionSource<AllEventsSlice>();
-            EnqueueOperation(new ReadAllEventsBackwardOperation(_settings.Log, source, position, maxCount, resolveLinkTos, userCredentials));
+            var operation = new ReadAllEventsBackwardOperation(_settings.Log, source, position, maxCount,
+                                                               resolveLinkTos, _settings.RequireMaster, userCredentials);
+            EnqueueOperation(operation);
             return source.Task;
         }
 
@@ -369,22 +390,22 @@ namespace EventStore.ClientAPI
         }
 
 
-        public void SetStreamMetadata(string stream, int expectedMetastreamVersion, Guid idempotencyId, StreamMetadata metadata, UserCredentials userCredentials = null)
+        public void SetStreamMetadata(string stream, int expectedMetastreamVersion, StreamMetadata metadata, UserCredentials userCredentials = null)
         {
-            SetStreamMetadataAsync(stream, expectedMetastreamVersion, idempotencyId, metadata, userCredentials).Wait();
+            SetStreamMetadataAsync(stream, expectedMetastreamVersion, metadata, userCredentials).Wait();
         }
 
-        public Task SetStreamMetadataAsync(string stream, int expectedMetastreamVersion, Guid idempotencyId, StreamMetadata metadata, UserCredentials userCredentials = null)
+        public Task SetStreamMetadataAsync(string stream, int expectedMetastreamVersion, StreamMetadata metadata, UserCredentials userCredentials = null)
         {
-            return SetStreamMetadataAsync(stream, expectedMetastreamVersion, idempotencyId, metadata.AsJsonBytes(), userCredentials);
+            return SetStreamMetadataAsync(stream, expectedMetastreamVersion, metadata.AsJsonBytes(), userCredentials);
         }
 
-        public void SetStreamMetadata(string stream, int expectedMetastreamVersion, Guid idempotencyId, byte[] metadata, UserCredentials userCredentials = null)
+        public void SetStreamMetadata(string stream, int expectedMetastreamVersion, byte[] metadata, UserCredentials userCredentials = null)
         {
-            SetStreamMetadataAsync(stream, expectedMetastreamVersion, idempotencyId, metadata, userCredentials).Wait();
+            SetStreamMetadataAsync(stream, expectedMetastreamVersion, metadata, userCredentials).Wait();
         }
 
-        public Task SetStreamMetadataAsync(string stream, int expectedMetastreamVersion, Guid idempotencyId, byte[] metadata, UserCredentials userCredentials = null)
+        public Task SetStreamMetadataAsync(string stream, int expectedMetastreamVersion, byte[] metadata, UserCredentials userCredentials = null)
         {
             Ensure.NotNullOrEmpty(stream, "stream");
             if (SystemStreams.IsMetastream(stream)) 
@@ -392,10 +413,10 @@ namespace EventStore.ClientAPI
 
             var source = new TaskCompletionSource<object>();
 
-            var metaevent = new EventData(idempotencyId, SystemEventTypes.StreamMetadata, true, metadata ?? Empty.ByteArray, null);
+            var metaevent = new EventData(Guid.NewGuid(), SystemEventTypes.StreamMetadata, true, metadata ?? Empty.ByteArray, null);
             EnqueueOperation(new AppendToStreamOperation(_settings.Log,
                                                          source,
-                                                         _settings.AllowForwarding,
+                                                         _settings.RequireMaster,
                                                          SystemStreams.MetastreamOf(stream),
                                                          expectedMetastreamVersion,
                                                          new[] { metaevent },
@@ -429,29 +450,38 @@ namespace EventStore.ClientAPI
 
         public Task<RawStreamMetadataResult> GetStreamMetadataAsRawBytesAsync(string stream, UserCredentials userCredentials = null)
         {
-            Ensure.NotNullOrEmpty(stream, "stream");
-
-            var source = new TaskCompletionSource<ClientMessage.ReadEventCompleted>();
-            EnqueueOperation(new ReadEventOperation(_settings.Log, source, SystemStreams.MetastreamOf(stream), -1, false, userCredentials));
-            return source.Task.ContinueWith(t =>
+            return ReadEventAsync(SystemStreams.MetastreamOf(stream), -1, false, userCredentials).ContinueWith(t =>
             {
                 if (t.Exception != null) 
                     throw t.Exception.InnerException;
 
                 var res = t.Result;
-                switch (res.Result)
+                switch (res.Status)
                 {
-                    case ClientMessage.ReadEventCompleted.ReadEventResult.Success:
-                        return new RawStreamMetadataResult(stream, false, res.Event.Event.EventNumber, res.Event.Event.Data);
-                    case ClientMessage.ReadEventCompleted.ReadEventResult.NotFound:
-                    case ClientMessage.ReadEventCompleted.ReadEventResult.NoStream:
+                    case EventReadStatus.Success:
+                        if (res.Event == null) throw new Exception("Event is null while operation result is Success.");
+                        var evnt = res.Event.Value.OriginalEvent;
+                        return new RawStreamMetadataResult(stream, false, evnt.EventNumber, evnt.Data);
+                    case EventReadStatus.NotFound:
+                    case EventReadStatus.NoStream:
                         return new RawStreamMetadataResult(stream, false, -1, Empty.ByteArray);
-                    case ClientMessage.ReadEventCompleted.ReadEventResult.StreamDeleted:
+                    case EventReadStatus.StreamDeleted:
                         return new RawStreamMetadataResult(stream, true, int.MaxValue, Empty.ByteArray);
                     default:
-                        throw new ArgumentOutOfRangeException(string.Format("Unexpected ReadEventResult: {0}.", res.Result));
+                        throw new ArgumentOutOfRangeException(string.Format("Unexpected ReadEventResult: {0}.", res.Status));
                 }
             });
+        }
+
+        public void SetSystemSettings(SystemSettings settings, UserCredentials userCredentials = null)
+        {
+            SetSystemSettingsAsync(settings, userCredentials).Wait();
+        }
+
+        public Task SetSystemSettingsAsync(SystemSettings settings, UserCredentials userCredentials = null)
+        {
+            return AppendToStreamAsync(SystemStreams.SettingsStream, ExpectedVersion.Any, userCredentials,
+                                       new EventData(Guid.NewGuid(), SystemEventTypes.Settings, true, settings.ToJsonBytes(), null));
         }
     }
 }

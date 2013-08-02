@@ -34,6 +34,7 @@ using System.Threading.Tasks;
 using EventStore.ClientAPI.Common.Utils;
 using EventStore.ClientAPI.Exceptions;
 using EventStore.ClientAPI.Messages;
+using EventStore.ClientAPI.SystemData;
 using EventStore.ClientAPI.Transport.Http;
 using System.Linq;
 using HttpStatusCode = EventStore.ClientAPI.Transport.Http.HttpStatusCode;
@@ -50,12 +51,14 @@ namespace EventStore.ClientAPI.Core
 
         private readonly HttpAsyncClient _client;
         private ClusterMessages.MemberInfoDto[] _oldGossip;
+        private TimeSpan _gossipTimeout;
 
         public ClusterDnsEndPointDiscoverer(ILogger log, 
                                             string clusterDns,
                                             int maxDiscoverAttempts, 
                                             int managerExternalHttpPort,
-                                            IPAddress[] fakeDnsEntries)
+                                            IPAddress[] fakeDnsEntries,
+                                            TimeSpan gossipTimeout)
         {
             Ensure.NotNull(log, "log");
             Ensure.NotNullOrEmpty(clusterDns, "clusterDns");
@@ -65,7 +68,7 @@ namespace EventStore.ClientAPI.Core
             _maxDiscoverAttempts = maxDiscoverAttempts;
             _managerExternalHttpPort = managerExternalHttpPort;
             _fakeDnsEntries = fakeDnsEntries;
-
+            _gossipTimeout = gossipTimeout;
             _client = new HttpAsyncClient(log);
         }
 
@@ -75,7 +78,7 @@ namespace EventStore.ClientAPI.Core
             {
                 for (int attempt = 1; attempt <= _maxDiscoverAttempts; ++attempt)
                 {
-                    _log.Info("Discovering cluster. Attempt {0}/{1}...", attempt, _maxDiscoverAttempts);
+                    //_log.Info("Discovering cluster. Attempt {0}/{1}...", attempt, _maxDiscoverAttempts);
                     try
                     {
                         var endPoints = DiscoverEndPoint(failedTcpEndPoint);
@@ -123,7 +126,7 @@ namespace EventStore.ClientAPI.Core
 
         private IPEndPoint[] GetGossipCandidatesFromDns()
         {
-            _log.Debug("ClusterDnsEndPointDiscoverer: GetGossipCandidatesFromDns");
+            //_log.Debug("ClusterDnsEndPointDiscoverer: GetGossipCandidatesFromDns");
 
             var ips = (_fakeDnsEntries != null && _fakeDnsEntries.Length > 0) ? _fakeDnsEntries : ResolveDns(_clusterDns);
             var managers = ips.Select(ip => new IPEndPoint(ip, _managerExternalHttpPort)).ToArray();
@@ -149,7 +152,7 @@ namespace EventStore.ClientAPI.Core
 
         private IPEndPoint[] GetGossipCandidatesFromOldGossip(IEnumerable<ClusterMessages.MemberInfoDto> oldGossip, IPEndPoint failedTcpEndPoint)
         {
-            _log.Debug("ClusterDnsEndPointDiscoverer: GetGossipCandidatesFromOldGossip, failedTcpEndPoint: {0}.", failedTcpEndPoint);
+            //_log.Debug("ClusterDnsEndPointDiscoverer: GetGossipCandidatesFromOldGossip, failedTcpEndPoint: {0}.", failedTcpEndPoint);
             var gossipCandidates = failedTcpEndPoint == null 
                     ? oldGossip.ToArray() 
                     : oldGossip.Where(x => !(x.ExternalTcpPort == failedTcpEndPoint.Port 
@@ -192,7 +195,7 @@ namespace EventStore.ClientAPI.Core
 
         private ClusterMessages.ClusterInfoDto TryGetGossipFrom(IPEndPoint endPoint)
         {
-            _log.Debug("ClusterDnsEndPointDiscoverer: Trying to get gossip from [{0}].", endPoint);
+            //_log.Debug("ClusterDnsEndPointDiscoverer: Trying to get gossip from [{0}].", endPoint);
 
             ClusterMessages.ClusterInfoDto result = null;
             var completed = new ManualResetEventSlim(false);
@@ -200,28 +203,30 @@ namespace EventStore.ClientAPI.Core
             var url = endPoint.ToHttpUrl("/gossip?format=json");
             _client.Get(
                 url,
+                null,
+                _gossipTimeout,
                 response =>
                 {
                     if (response.HttpStatusCode != HttpStatusCode.OK)
                     {
-                        _log.Info("[{0}] responded with {1} ({2})", endPoint, response.HttpStatusCode, response.StatusDescription);
+                        //_log.Info("[{0}] responded with {1} ({2})", endPoint, response.HttpStatusCode, response.StatusDescription);
                         completed.Set();
                         return;
                     }
                     try
                     {
                         result = response.Body.ParseJson<ClusterMessages.ClusterInfoDto>();
-                        _log.Debug("ClusterDnsEndPointDiscoverer: Got gossip from [{0}]:\n{1}.", endPoint, string.Join("\n", result.Members.Select(x => x.ToString())));
+                        //_log.Debug("ClusterDnsEndPointDiscoverer: Got gossip from [{0}]:\n{1}.", endPoint, string.Join("\n", result.Members.Select(x => x.ToString())));
                     }
-                    catch (Exception e)
+                    catch (Exception)
                     {
-                        _log.Info(e, "Failed to get cluster info from [{0}]: deserialization error.", endPoint);
+                        //_log.Info("Failed to get cluster info from [{0}]: deserialization error: {1}.", endPoint, e.Message);
                     }
                     completed.Set();
                 },
                 e =>
                 {
-                    _log.Info(e, "Failed to get cluster info from [{0}]: request failed.", endPoint);
+                    //_log.Info("Failed to get cluster info from [{0}]: request failed, error: {1}.", endPoint, e.Message);
                     completed.Set();
                 });
 
@@ -243,15 +248,15 @@ namespace EventStore.ClientAPI.Core
                               .FirstOrDefault();
             if (node == null)
             {
-                _log.Info("Unable to locate suitable node. Gossip info:\n{0}.", string.Join("\n", members.Select(x => x.ToString())));
+                //_log.Info("Unable to locate suitable node. Gossip info:\n{0}.", string.Join("\n", members.Select(x => x.ToString())));
                 return null;
             }
 
-            _log.Info("Best choice found: [{0}:{1}] ({2}).", node.ExternalTcpIp, node.ExternalTcpPort, node.State);
             var normTcp = new IPEndPoint(IPAddress.Parse(node.ExternalTcpIp), node.ExternalTcpPort);
             var secTcp = node.ExternalSecureTcpPort > 0
                                  ? new IPEndPoint(IPAddress.Parse(node.ExternalTcpIp), node.ExternalSecureTcpPort)
                                  : null;
+            _log.Info("Discovering: found best choice [{0},{1}] ({2}).", normTcp, secTcp == null ? "n/a" : secTcp.ToString(), node.State);
             return new NodeEndPoints(normTcp, secTcp);
         }
     }

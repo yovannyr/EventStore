@@ -14,19 +14,22 @@ enum OperationResult
 
 message NewEvent {
 	required bytes event_id = 1;
-	optional string event_type = 2;
-	required bool is_json = 3;
-	required bytes data = 4;
-	optional bytes metadata = 5;
+	required string event_type = 2;
+	required int32 data_content_type = 3;
+	required int32 metadata_content_type = 4;
+	required bytes data = 5;
+	optional bytes metadata = 6;
 }
 
 message EventRecord {
 	required string event_stream_id = 1;
 	required int32 event_number = 2;
 	required bytes event_id = 3;
-	optional string event_type = 4;
-	required bytes data = 5;
-	optional bytes metadata = 6;
+	required string event_type = 4;
+	required int32 data_content_type = 5;
+	required int32 metadata_content_type = 6;
+	required bytes data = 7;
+	optional bytes metadata = 8;
 }
 
 message ResolvedIndexedEvent {
@@ -41,24 +44,11 @@ message ResolvedEvent {
 	required int64 prepare_position = 4;
 }
 
-message CreateStream {
-	required string event_stream_id = 1;
-	required bytes request_id = 2;
-	optional bytes metadata = 3;
-	required bool allow_forwarding = 4;
-	required bool is_json = 5;
-}
-
-message CreateStreamCompleted {
-	required OperationResult result = 1;
-	optional string message = 2;
-}
-
 message WriteEvents {
 	required string event_stream_id = 1;
 	required int32 expected_version = 2;
 	repeated NewEvent events = 3;
-	required bool allow_forwarding = 4;
+	required bool require_master = 4;
 }
 
 message WriteEventsCompleted {
@@ -70,7 +60,7 @@ message WriteEventsCompleted {
 message DeleteStream {
 	required string event_stream_id = 1;
 	required int32 expected_version = 2;
-	required bool allow_forwarding = 3;
+	required bool require_master = 3;
 }
 
 message DeleteStreamCompleted {
@@ -78,10 +68,46 @@ message DeleteStreamCompleted {
 	optional string message = 2;
 }
 
+message TransactionStart {
+	required string event_stream_id = 1;
+	required int32 expected_version = 2;
+	required bool require_master = 3;
+}
+
+message TransactionStartCompleted {
+	required int64 transaction_id = 1;
+	required OperationResult result = 2;
+	optional string message = 3;
+}
+
+message TransactionWrite {
+	required int64 transaction_id = 1;
+	repeated NewEvent events = 2;
+	required bool require_master = 3;
+}
+
+message TransactionWriteCompleted {
+	required int64 transaction_id = 1;
+	required OperationResult result = 2;
+	optional string message = 3;
+}
+
+message TransactionCommit {
+	required int64 transaction_id = 1;
+	required bool require_master = 2;
+}
+
+message TransactionCommitCompleted {
+	required int64 transaction_id = 1;
+	required OperationResult result = 2;
+	optional string message = 3;
+}
+
 message ReadEvent {
 	required string event_stream_id = 1;
 	required int32 event_number = 2;
 	required bool resolve_link_tos = 3;
+	required bool require_master = 4;
 }
 
 message ReadEventCompleted {
@@ -106,6 +132,7 @@ message ReadStreamEvents {
 	required int32 from_event_number = 2;
 	required int32 max_count = 3;
 	required bool resolve_link_tos = 4;
+	required bool require_master = 5;
 }
 
 message ReadStreamEventsCompleted {
@@ -134,6 +161,7 @@ message ReadAllEvents {
 	required int64 prepare_position = 2;
 	required int32 max_count = 3;
 	required bool resolve_link_tos = 4;
+	required bool require_master = 5;
 }
 
 message ReadAllEventsCompleted {
@@ -153,41 +181,6 @@ message ReadAllEventsCompleted {
 
 	optional ReadAllResult result = 6 [default = Success];
 	optional string error = 7;
-}
-
-message TransactionStart {
-	required string event_stream_id = 1;
-	required int32 expected_version = 2;
-	required bool allow_forwarding = 3;
-}
-
-message TransactionStartCompleted {
-	required int64 transaction_id = 1;
-	required OperationResult result = 2;
-	optional string message = 3;
-}
-
-message TransactionWrite {
-	required int64 transaction_id = 1;
-	repeated NewEvent events = 2;
-	required bool allow_forwarding = 3;
-}
-
-message TransactionWriteCompleted {
-	required int64 transaction_id = 1;
-	required OperationResult result = 2;
-	optional string message = 3;
-}
-
-message TransactionCommit {
-	required int64 transaction_id = 1;
-	required bool allow_forwarding = 2;
-}
-
-message TransactionCommitCompleted {
-	required int64 transaction_id = 1;
-	required OperationResult result = 2;
-	optional string message = 3;
 }
 
 message SubscribeToStream {

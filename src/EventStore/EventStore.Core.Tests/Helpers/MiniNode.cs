@@ -50,6 +50,8 @@ namespace EventStore.Core.Tests.Helpers
 {
     public class MiniNode
     {
+        private static bool _running;
+
         public static int RunCount = 0;
         public static readonly Stopwatch RunningTime = new Stopwatch();
         public static readonly Stopwatch StartingTime = new Stopwatch();
@@ -71,8 +73,11 @@ namespace EventStore.Core.Tests.Helpers
         public MiniNode(string pathname, 
                         int? tcpPort = null, int? tcpSecPort = null, int? httpPort = null, 
                         ISubsystem[] subsystems = null,
-                        int? chunkSize = null, int? cachedChunkSize = null, bool skipInitializeStandardUsersCheck = true)
+                        int? chunkSize = null, int? cachedChunkSize = null, bool enableTrustedAuth = false, bool skipInitializeStandardUsersCheck = true)
         {
+            if (_running) throw new Exception("Previous MiniNode is still running!!!");
+            _running = true;
+
             RunningTime.Start();
             RunCount += 1;
 
@@ -94,8 +99,10 @@ namespace EventStore.Core.Tests.Helpers
                                                               TcpSecEndPoint,
                                                               HttpEndPoint,
                                                               new[] { HttpEndPoint.ToHttpUrl() },
+                                                              enableTrustedAuth,
                                                               ssl_connections.GetCertificate(),
                                                               1,
+                                                              TFConsts.MinFlushDelayMs,
                                                               TimeSpan.FromSeconds(2),
                                                               TimeSpan.FromSeconds(2),
                                                               TimeSpan.FromHours(1),
@@ -111,7 +118,7 @@ namespace EventStore.Core.Tests.Helpers
                      + "{17,-25} {18}\n"
                      + "{19,-25} {20}\n\n",
                      "ES VERSION:", VersionInfo.Version, VersionInfo.Branch, VersionInfo.Hashtag, VersionInfo.Timestamp,
-                     "OS:", OS.IsLinux ? "Linux" : "Windows", Environment.OSVersion,
+                     "OS:", OS.OsFlavor, Environment.OSVersion,
                      "RUNTIME:", OS.GetRuntimeVersion(), Marshal.SizeOf(typeof(IntPtr)) * 8,
                      "GC:", GC.MaxGeneration == 0 ? "NON-GENERATION (PROBABLY BOEHM)" : string.Format("{0} GENERATIONS", GC.MaxGeneration + 1),
                      "DBPATH:", _dbPath,
@@ -163,6 +170,8 @@ namespace EventStore.Core.Tests.Helpers
 
             StoppingTime.Stop();
             RunningTime.Stop();
+
+            _running = false;
         }
 
         private void TryDeleteDirectory(string directory)

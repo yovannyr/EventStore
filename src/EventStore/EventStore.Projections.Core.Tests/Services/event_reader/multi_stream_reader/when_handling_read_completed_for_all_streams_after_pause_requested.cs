@@ -44,7 +44,7 @@ namespace EventStore.Projections.Core.Tests.Services.event_reader.multi_stream_r
     public class when_handling_read_completed_for_all_streams_after_pause_requested : TestFixtureWithExistingEvents
     {
         private MultiStreamEventReader _edp;
-        private Guid _publishWithCorrelationId;
+        //private Guid _publishWithCorrelationId;
         private Guid _distibutionPointCorrelationId;
         private Guid _firstEventId;
         private Guid _secondEventId;
@@ -60,12 +60,12 @@ namespace EventStore.Projections.Core.Tests.Services.event_reader.multi_stream_r
         private Dictionary<string, int> _ab12Tag;
 
         [SetUp]
-        public void When()
+        public new void When()
         {
             _ab12Tag = new Dictionary<string, int> {{"a", 1}, {"b", 2}};
             _abStreams = new[] {"a", "b"};
 
-            _publishWithCorrelationId = Guid.NewGuid();
+            //_publishWithCorrelationId = Guid.NewGuid();
             _distibutionPointCorrelationId = Guid.NewGuid();
             _edp = new MultiStreamEventReader(
                 _bus, _distibutionPointCorrelationId, null, _abStreams, _ab12Tag, false, new RealTimeProvider());
@@ -90,7 +90,7 @@ namespace EventStore.Projections.Core.Tests.Services.event_reader.multi_stream_r
                                 2, 150, Guid.NewGuid(), _secondEventId, 150, 0, "a", ExpectedVersion.Any, DateTime.UtcNow,
                                 PrepareFlags.SingleWrite | PrepareFlags.TransactionBegin | PrepareFlags.TransactionEnd,
                                 "event_type2", new byte[] {3}, new byte[] {4}), null)
-                        }, "", 3, 2, true, 200));
+                        }, null, false, "", 3, 2, true, 200));
             _edp.Handle(
                 new ClientMessage.ReadStreamEventsForwardCompleted(
                     _distibutionPointCorrelationId, "b", 100, 100, ReadStreamResult.Success, 
@@ -106,7 +106,7 @@ namespace EventStore.Projections.Core.Tests.Services.event_reader.multi_stream_r
                                 3, 200, Guid.NewGuid(), _fourthEventId, 200, 0, "b", ExpectedVersion.Any, DateTime.UtcNow,
                                 PrepareFlags.SingleWrite | PrepareFlags.TransactionBegin | PrepareFlags.TransactionEnd,
                                 "event_type2", new byte[] {3}, new byte[] {4}), null)
-                    }, "", 4, 3, true, 200));
+                    }, null, false, "", 4, 3, true, 200));
         }
 
         [Test]
@@ -141,7 +141,7 @@ namespace EventStore.Projections.Core.Tests.Services.event_reader.multi_stream_r
                                 3, 250, Guid.NewGuid(), Guid.NewGuid(), 250, 0, "a", ExpectedVersion.Any, DateTime.UtcNow,
                                 PrepareFlags.SingleWrite | PrepareFlags.TransactionBegin | PrepareFlags.TransactionEnd,
                                 "event_type", new byte[0], new byte[0]), null)
-                    }, "", 4, 4, false, 300));
+                    }, null, false, "", 4, 4, false, 300));
         }
 
     }
