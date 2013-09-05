@@ -40,6 +40,7 @@ namespace EventStore.Core.TransactionLog.LogRecords
         TransactionBegin = 0x02,          // prepare starts transaction
         TransactionEnd = 0x04,            // prepare ends transaction
         StreamDelete = 0x08,              // prepare deletes stream
+        StreamMeta = 0x10,            // "new kind" of prepare containing stream metadata or event pointer to it
 
         IsCommitted = 0x20,              // prepare should be considered committed immediately, no commit will follow in TF
         //Update = 0x30,                  // prepare updates previous instance of the same event, DANGEROUS!
@@ -69,6 +70,67 @@ namespace EventStore.Core.TransactionLog.LogRecords
         }
     }
 
+    public enum StreamMetaKind
+    {
+        None,
+        EventPointer,
+        Metadata
+    }
+
+    public struct StreamMeta
+    {
+        public readonly StreamMetaKind MetaKind;
+
+        public readonly int EventNumber;
+        public readonly byte[] Data;
+
+        public static readonly StreamMeta None = new StreamMeta(StreamMetaKind.None, -1, null);
+
+        public static StreamMeta FromEventPointer(int eventNumber)
+        {
+            Ensure.Nonnegative(eventNumber, "eventNumber");
+            return new StreamMeta(StreamMetaKind.EventPointer, eventNumber, null);
+        }
+
+        public static StreamMeta FromMetadata(byte[] streamMetadata)
+        {
+            Ensure.NotNull(streamMetadata, "streamMetadata");
+            return new StreamMeta(StreamMetaKind.Metadata, -1, streamMetadata);
+        }
+
+        private StreamMeta(StreamMetaKind metaKind, int eventNumber, byte[] data)
+        {
+            switch (metaKind)
+            {
+                case StreamMetaKind.None:
+                    Ensure.Equal(-1, eventNumber, "eventNumber");
+                    Ensure.IsNull(data, "data");
+                    break;
+                case StreamMetaKind.EventPointer:
+                    Ensure.Nonnegative(eventNumber, "eventNumber");
+                    Ensure.IsNull(data, "data");
+                    break;
+                case StreamMetaKind.Metadata:
+                    Ensure.Equal(-1, eventNumber, "eventNumber");
+                    Ensure.NotNull(data, "data");
+                    break;
+                default:
+                    throw new Exception(string.Format("Unknown StreamMetaKind: {0}", metaKind));
+            }
+            MetaKind = metaKind;
+            EventNumber = eventNumber;
+            Data = data;
+        }
+
+        public static bool Equals(StreamMeta a, StreamMeta b)
+        {
+            return a.MetaKind == b.MetaKind
+                   && a.EventNumber == b.EventNumber
+                   && (a.Data == b.Data 
+                       || (a.Data != null && b.Data != null && a.Data.SequenceEqual(b.Data)));
+        }
+    }
+
     public class PrepareLogRecord: LogRecord, IEquatable<PrepareLogRecord>
     {
         public const byte PrepareRecordVersion = 0;
@@ -85,6 +147,8 @@ namespace EventStore.Core.TransactionLog.LogRecords
         public readonly string EventType;
         public readonly byte[] Data;
         public readonly byte[] Metadata;
+
+        public readonly StreamMeta StreamMeta;
 
         public long InMemorySize
         {
@@ -104,7 +168,10 @@ namespace EventStore.Core.TransactionLog.LogRecords
                        + 8
                        + IntPtr.Size + EventType.Length*2
                        + IntPtr.Size + Data.Length
-                       + IntPtr.Size + Metadata.Length;
+                       + IntPtr.Size + Metadata.Length
+                       
+                       + 4
+                       + IntPtr.Size + (StreamMeta.Data == null ? 0 : StreamMeta.Data.Length);
             }
         }
 
@@ -119,7 +186,8 @@ namespace EventStore.Core.TransactionLog.LogRecords
                                 PrepareFlags flags,
                                 string eventType, 
                                 byte[] data,
-                                byte[] metadata)
+                                byte[] metadata,
+                                StreamMeta streamMeta)
             : base(LogRecordType.Prepare, PrepareRecordVersion, logPosition)
         {
             Ensure.NotEmptyGuid(correlationId, "correlationId");
@@ -144,6 +212,8 @@ namespace EventStore.Core.TransactionLog.LogRecords
             EventType = eventType ?? string.Empty;
             Data = data;
             Metadata = metadata ?? NoData;
+
+            StreamMeta = streamMeta;
         }
 
         internal PrepareLogRecord(BinaryReader reader, byte version, long logPosition): base(LogRecordType.Prepare, version, logPosition)
@@ -167,6 +237,18 @@ namespace EventStore.Core.TransactionLog.LogRecords
             
             var metadataCount = reader.ReadInt32();
             Metadata = metadataCount == 0 ? NoData : reader.ReadBytes(metadataCount);
+
+            if (Flags.HasAnyOf(PrepareFlags.StreamMeta))
+            {
+                var value = reader.ReadInt32();
+                StreamMeta = value < -1
+                                 ? StreamMeta.FromMetadata(reader.ReadBytes(value & 0x7FFFFFFF))
+                                 : StreamMeta.FromEventPointer(value);
+            }
+            else
+            {
+                StreamMeta = StreamMeta.None;
+            }
         }
 
         public override void WriteTo(BinaryWriter writer)
@@ -187,6 +269,19 @@ namespace EventStore.Core.TransactionLog.LogRecords
             writer.Write(Data);
             writer.Write(Metadata.Length);
             writer.Write(Metadata);
+
+            if (Flags.HasAnyOf(PrepareFlags.StreamMeta))
+            {
+                switch (StreamMeta.MetaKind)
+                {
+                    case StreamMetaKind.None: throw new Exception("No StreamMeta specified.");
+                    case StreamMetaKind.EventPointer: writer.Write(StreamMeta.EventNumber); break;
+                    case StreamMetaKind.Metadata: writer.Write(StreamMeta.Data.Length); writer.Write(StreamMeta.Data); break;
+                    default: throw new Exception(string.Format("Unknown StreamMetaKind: {0}", StreamMeta.MetaKind));
+                }
+            }
+            else if (StreamMeta.MetaKind != StreamMetaKind.None)
+                throw new Exception("Writing StreamMeta without corresponding flag.");
         }
 
         public bool Equals(PrepareLogRecord other)
@@ -205,7 +300,9 @@ namespace EventStore.Core.TransactionLog.LogRecords
                    && other.TimeStamp.Equals(TimeStamp)
                    && other.EventType.Equals(EventType)
                    && other.Data.SequenceEqual(Data)
-                   && other.Metadata.SequenceEqual(Metadata);
+                   && other.Metadata.SequenceEqual(Metadata)
+                   
+                   && other.StreamMeta.Equals(StreamMeta);
         }
 
         public override bool Equals(object obj)
@@ -233,6 +330,8 @@ namespace EventStore.Core.TransactionLog.LogRecords
                 result = (result * 397) ^ EventType.GetHashCode();
                 result = (result * 397) ^ Data.GetHashCode();
                 result = (result * 397) ^ Metadata.GetHashCode();
+
+                result = (result * 397) ^ StreamMeta.GetHashCode();
                 return result;
             }
         }
@@ -259,7 +358,9 @@ namespace EventStore.Core.TransactionLog.LogRecords
                                  + "CorrelationId: {7}, " 
                                  + "TimeStamp: {8}, " 
                                  + "EventType: {9}, " 
-                                 + "InMemorySize: {10}",
+                                 + "StreamMetaKind: {10}, "
+                                 + "StreamMetaEventNumber: {11}, "
+                                 + "InMemorySize: {12}, ",
                                  LogPosition,
                                  Flags,
                                  TransactionPosition,
@@ -270,6 +371,8 @@ namespace EventStore.Core.TransactionLog.LogRecords
                                  CorrelationId,
                                  TimeStamp,
                                  EventType,
+                                 StreamMeta.MetaKind,
+                                 StreamMeta.EventNumber,
                                  InMemorySize);
         }
     }

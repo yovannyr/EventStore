@@ -58,24 +58,20 @@ namespace EventStore.Core.TransactionLog.LogRecords
 
             switch (recordType)
             {
-                case LogRecordType.Prepare:
-                    return new PrepareLogRecord(reader, version, logPosition);
-                case LogRecordType.Commit:
-                    return new CommitLogRecord(reader, version, logPosition);
-                case LogRecordType.System:
-                    return new SystemLogRecord(reader, version, logPosition);
-                default:
-                    throw new ArgumentOutOfRangeException("recordType");
+                case LogRecordType.Prepare: return new PrepareLogRecord(reader, version, logPosition);
+                case LogRecordType.Commit:  return new CommitLogRecord(reader, version, logPosition);
+                case LogRecordType.System:  return new SystemLogRecord(reader, version, logPosition);
+                default: throw new Exception(string.Format("Unknown LogRecordType: '{0}'.", recordType));
             }
         }
 
         public static PrepareLogRecord Prepare(long logPosition, Guid correlationId, Guid eventId, long transactionPos, int transactionOffset,
                                                string eventStreamId, int expectedVersion, PrepareFlags flags, string eventType, 
-                                               byte[] data, byte[] metadata, DateTime? timeStamp = null)
+                                               byte[] data, byte[] metadata, StreamMeta streamMeta, DateTime? timeStamp = null)
         {
             return new PrepareLogRecord(logPosition, correlationId, eventId, transactionPos, transactionOffset, 
                                         eventStreamId, expectedVersion, timeStamp ?? DateTime.UtcNow, flags, eventType,
-                                        data, metadata);
+                                        data, metadata, streamMeta);
         }
 
         public static CommitLogRecord Commit(long logPosition, Guid correlationId, long startPosition, int eventNumber)
@@ -84,41 +80,45 @@ namespace EventStore.Core.TransactionLog.LogRecords
         }
 
         public static PrepareLogRecord SingleWrite(long logPosition, Guid correlationId, Guid eventId, string eventStreamId, 
-                                                   int expectedVersion, string eventType, byte[] data, byte[] metadata, 
-                                                   DateTime? timestamp = null, PrepareFlags? additionalFlags = null)
+                                                   int expectedVersion, string eventType, byte[] data, byte[] metadata,
+                                                   StreamMeta streamMeta, DateTime? timestamp = null, PrepareFlags? additionalFlags = null)
         {
+            var flags = PrepareFlags.Data | PrepareFlags.StreamMeta 
+                        | PrepareFlags.TransactionBegin | PrepareFlags.TransactionEnd
+                        | (additionalFlags ?? PrepareFlags.None);
             return new PrepareLogRecord(logPosition, correlationId, eventId, logPosition, 0, eventStreamId, expectedVersion, 
-                                        timestamp ?? DateTime.UtcNow, 
-                                        PrepareFlags.Data | PrepareFlags.TransactionBegin | PrepareFlags.TransactionEnd | (additionalFlags ?? PrepareFlags.None), 
-                                        eventType, data, metadata);
+                                        timestamp ?? DateTime.UtcNow, flags, eventType, data, metadata, streamMeta);
         }
 
         public static PrepareLogRecord TransactionBegin(long logPos, Guid correlationId, string eventStreamId, int expectedVersion)
         {
             return new PrepareLogRecord(logPos, correlationId, Guid.NewGuid(), logPos, -1, eventStreamId, expectedVersion, 
-                                        DateTime.UtcNow, PrepareFlags.TransactionBegin, null, NoData, NoData);
+                                        DateTime.UtcNow, PrepareFlags.TransactionBegin, null, NoData, NoData, StreamMeta.None);
         }
 
-        public static PrepareLogRecord TransactionWrite(long logPosition, Guid correlationId, Guid eventId, long transactionPos, int transactionOffset, string eventStreamId, string eventType, byte[] data, byte[] metadata, bool isJson)
+        public static PrepareLogRecord TransactionWrite(long logPosition, Guid correlationId, Guid eventId, long transactionPos,
+                                                        int transactionOffset, string eventStreamId, string eventType,
+                                                        byte[] data, byte[] metadata, bool isJson, StreamMeta streamMeta)
         {
             return new PrepareLogRecord(logPosition, correlationId, eventId, transactionPos, transactionOffset,
                                         eventStreamId, ExpectedVersion.Any, DateTime.UtcNow, PrepareFlags.Data | (isJson ? PrepareFlags.IsJson : PrepareFlags.None), 
-                                        eventType, data, metadata);
+                                        eventType, data, metadata, streamMeta);
         }
 
         public static PrepareLogRecord TransactionEnd(long logPos, Guid correlationId, Guid eventId, long transactionPos, string eventStreamId)
         {
             return new PrepareLogRecord(logPos, correlationId, eventId, transactionPos, -1, eventStreamId, ExpectedVersion.Any, 
-                                        DateTime.UtcNow, PrepareFlags.TransactionEnd, null, NoData, NoData);
+                                        DateTime.UtcNow, PrepareFlags.TransactionEnd, null, NoData, NoData, StreamMeta.None);
         }
 
         public static PrepareLogRecord DeleteTombstone(long logPosition, Guid correlationId, Guid eventId,
-                                                       string eventStreamId, int expectedVersion, PrepareFlags additionalFlags = PrepareFlags.None)
+                                                       string eventStreamId, int expectedVersion,
+                                                       StreamMeta streamMeta, PrepareFlags additionalFlags = PrepareFlags.None)
         {
             return new PrepareLogRecord(logPosition, correlationId, eventId, logPosition, 0, eventStreamId, 
                                         expectedVersion, DateTime.UtcNow, 
                                         PrepareFlags.StreamDelete | PrepareFlags.TransactionBegin | PrepareFlags.TransactionEnd | additionalFlags, 
-                                        SystemEventTypes.StreamDeleted, NoData, NoData);
+                                        SystemEventTypes.StreamDeleted, NoData, NoData, streamMeta);
         }
 
         protected LogRecord(LogRecordType recordType, byte version, long logPosition)

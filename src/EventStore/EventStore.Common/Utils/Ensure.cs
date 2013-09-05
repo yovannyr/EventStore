@@ -31,6 +31,12 @@ namespace EventStore.Common.Utils
 {
     public static class Ensure
     {
+        public static void IsNull<T>(T argument, string argumentName) where T : class
+        {
+            if (argument != null)
+                throw new ArgumentException(string.Format("Argument '{0}' is not null", argumentName));
+        }
+
         public static void NotNull<T>(T argument, string argumentName) where T : class 
         {
             if (argument == null)
@@ -46,25 +52,25 @@ namespace EventStore.Common.Utils
         public static void Positive(int number, string argumentName)
         {
             if (number <= 0)
-                throw new ArgumentOutOfRangeException(argumentName, argumentName + " should be positive.");
+                throw new ArgumentOutOfRangeException(argumentName, string.Format("'{0}' should be positive. Actual value: {1}.", argumentName, number));
         }
 
         public static void Positive(long number, string argumentName)
         {
             if (number <= 0)
-                throw new ArgumentOutOfRangeException(argumentName, argumentName + " should be positive.");
+                throw new ArgumentOutOfRangeException(argumentName, string.Format("'{0}' should be positive. Actual value: {1}.", argumentName, number));
         }
 
         public static void Nonnegative(long number, string argumentName)
         {
             if (number < 0)
-                throw new ArgumentOutOfRangeException(argumentName, argumentName + " should be non negative.");
+                throw new ArgumentOutOfRangeException(argumentName, string.Format("'{0}' should be non negative. Actual value: {1}.", argumentName, number));
         }
 
         public static void Nonnegative(int number, string argumentName)
         {
             if (number < 0)
-                throw new ArgumentOutOfRangeException(argumentName, argumentName + " should be non negative.");
+                throw new ArgumentOutOfRangeException(argumentName, string.Format("'{0}' should be non negative. Actual value: {1}.", argumentName, number));
         }
 
         public static void NotEmptyGuid(Guid guid, string argumentName)

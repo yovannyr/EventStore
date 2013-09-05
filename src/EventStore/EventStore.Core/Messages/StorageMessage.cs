@@ -64,10 +64,12 @@ namespace EventStore.Core.Messages
             public string EventStreamId { get; private set; }
             public int ExpectedVersion { get; private set; }
             public readonly Event[] Events;
+            public readonly byte[] StreamMetadata;
 
             public readonly DateTime LiveUntil;
 
-            public WritePrepares(Guid correlationId, IEnvelope envelope, string eventStreamId, int expectedVersion, Event[] events, DateTime liveUntil)
+            public WritePrepares(Guid correlationId, IEnvelope envelope, string eventStreamId, int expectedVersion,
+                                 Event[] events, DateTime liveUntil, byte[] streamMetadata = null)
             {
                 Ensure.NotEmptyGuid(correlationId, "correlationId");
                 Ensure.NotNull(envelope, "envelope");
@@ -79,6 +81,7 @@ namespace EventStore.Core.Messages
                 EventStreamId = eventStreamId;
                 ExpectedVersion = expectedVersion;
                 Events = events;
+                StreamMetadata = streamMetadata;
 
                 LiveUntil = liveUntil;
             }
@@ -93,10 +96,12 @@ namespace EventStore.Core.Messages
             public IEnvelope Envelope { get; private set; }
             public string EventStreamId { get; private set; }
             public int ExpectedVersion { get; private set; }
+            public readonly byte[] StreamMetadata;
 
             public readonly DateTime LiveUntil;
 
-            public WriteDelete(Guid correlationId, IEnvelope envelope, string eventStreamId, int expectedVersion, DateTime liveUntil)
+            public WriteDelete(Guid correlationId, IEnvelope envelope, string eventStreamId, int expectedVersion,
+                               DateTime liveUntil, byte[] streamMetadata = null)
             {
                 Ensure.NotEmptyGuid(correlationId, "correlationId");
                 Ensure.NotNull(envelope, "envelope");
@@ -106,6 +111,7 @@ namespace EventStore.Core.Messages
                 Envelope = envelope;
                 EventStreamId = eventStreamId;
                 ExpectedVersion = expectedVersion;
+                StreamMetadata = streamMetadata;
 
                 LiveUntil = liveUntil;
             }
@@ -164,13 +170,15 @@ namespace EventStore.Core.Messages
             public readonly IEnvelope Envelope;
             public readonly long TransactionId;
             public readonly Event[] Events;
+            public readonly byte[] StreamMetadata;
 
-            public WriteTransactionData(Guid correlationId, IEnvelope envelope, long transactionId, Event[] events)
+            public WriteTransactionData(Guid correlationId, IEnvelope envelope, long transactionId, Event[] events, byte[] streamMetadata = null)
             {
                 CorrelationId = correlationId;
                 Envelope = envelope;
                 TransactionId = transactionId;
                 Events = events;
+                StreamMetadata = streamMetadata;
             }
         }
 

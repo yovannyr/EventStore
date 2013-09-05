@@ -269,6 +269,7 @@ namespace EventStore.Core.Services.Storage
                     ActOnCommitCheckFailure(message.Envelope, message.CorrelationId, commitCheck);
                     return;
                 }
+
                 var prepares = new List<PrepareLogRecord>();
                 var logPosition = Writer.Checkpoint.ReadNonFlushed();
                 if (message.Events.Length > 0)
@@ -278,10 +279,16 @@ namespace EventStore.Core.Services.Storage
                     {
                         var evnt = message.Events[i];
                         var flags = PrepareFlags.Data | PrepareFlags.IsCommitted;
+                        var streamMeta = StreamMeta.None;
                         if (i == 0)
                             flags |= PrepareFlags.TransactionBegin;
                         if (i == message.Events.Length - 1)
-                            flags |= PrepareFlags.TransactionEnd;
+                        {
+                            flags |= PrepareFlags.TransactionEnd | PrepareFlags.StreamMeta;
+                            streamMeta = message.StreamMetadata == null
+                                ? GetExistingStreamMeta()
+                                : StreamMeta.FromMetadata(GetStructuredMetadataFromUserRawMeta(message.StreamMetadata));
+                        }
                         if (evnt.IsJson)
                             flags |= PrepareFlags.IsJson;
 
@@ -290,7 +297,7 @@ namespace EventStore.Core.Services.Storage
                         var res = WritePrepareWithRetry(
                             LogRecord.Prepare(logPosition, message.CorrelationId, evnt.EventId,
                                               transactionPosition, i, message.EventStreamId,
-                                              expectedVersion, flags, evnt.EventType, evnt.Data, evnt.Metadata));
+                                              expectedVersion, flags, evnt.EventType, evnt.Data, evnt.Metadata, streamMeta));
                         logPosition = res.NewPos;
                         if (i == 0)
                             transactionPosition = res.WrittenPos; // transaction position could be changed due to switching to new chunk
@@ -303,7 +310,7 @@ namespace EventStore.Core.Services.Storage
                         LogRecord.Prepare(logPosition, message.CorrelationId, Guid.NewGuid(), logPosition, -1,
                                           message.EventStreamId, message.ExpectedVersion,
                                           PrepareFlags.TransactionBegin | PrepareFlags.TransactionEnd | PrepareFlags.IsCommitted,
-                                          null, Empty.ByteArray, Empty.ByteArray));
+                                          null, Empty.ByteArray, Empty.ByteArray, StreamMeta.None)));
                     prepares.Add(res.Prepare);
                 }
                 IndexWriter.PreCommit(prepares);
@@ -337,8 +344,12 @@ namespace EventStore.Core.Services.Storage
                 }
                 // when IsCommitted ExpectedVersion is actually real EventNumber
                 const int expectedVersion = EventNumber.DeletedStream - 1;
+                var streamMeta = message.StreamMetadata == null
+                    ? GetExistingStreamMeta()
+                    : StreamMeta.FromMetadata(GetStructuredMetadataFromUserRawMeta(message.StreamMetadata));
                 var record = LogRecord.DeleteTombstone(Writer.Checkpoint.ReadNonFlushed(), message.CorrelationId,
-                                                       eventId, message.EventStreamId, expectedVersion, PrepareFlags.IsCommitted); 
+                                                       eventId, message.EventStreamId, expectedVersion, streamMeta,
+                                                       PrepareFlags.IsCommitted); 
                 var res = WritePrepareWithRetry(record);
                 IndexWriter.PreCommit(new[] {res.Prepare});
             }
