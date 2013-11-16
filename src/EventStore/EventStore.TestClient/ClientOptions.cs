@@ -37,6 +37,8 @@ namespace EventStore.TestClient
     /// </summary>
     public sealed class ClientOptions : IOptions
     {
+	    private const string DefaultJsonConfigFileName = "testclient-config.json";
+
         public bool ShowHelp { get { return _helper.Get(() => ShowHelp); } }
         public bool ShowVersion { get { return _helper.Get(() => ShowVersion); } }
         public string LogsDir { get { return _helper.Get(() => LogsDir); } }
@@ -49,14 +51,14 @@ namespace EventStore.TestClient
         public int ReadWindow { get { return _helper.Get(() => ReadWindow); } }
         public int WriteWindow { get { return _helper.Get(() => WriteWindow); } }
         public int PingWindow { get { return _helper.Get(() => PingWindow); } }
-
+        public bool Force { get { return _helper.Get(() => Force); } }
         public string[] Command { get; private set; }
 
         private readonly OptsHelper _helper;
 
         public ClientOptions()
         {
-            _helper = new OptsHelper(null, Opts.EnvPrefix);
+			_helper = new OptsHelper(null, Opts.EnvPrefix, DefaultJsonConfigFileName);
 
             _helper.Register(() => ShowHelp, Opts.ShowHelpCmd, Opts.ShowHelpEnv, Opts.ShowHelpJson, Opts.ShowHelpDefault, Opts.ShowHelpDescr);
             _helper.Register(() => ShowVersion, Opts.ShowVersionCmd, Opts.ShowVersionEnv, Opts.ShowVersionJson, Opts.ShowVersionDefault, Opts.ShowVersionDescr);
@@ -70,6 +72,7 @@ namespace EventStore.TestClient
             _helper.Register(() => ReadWindow, "r|read-window=", null, null, 2000, "The difference between sent/received read commands.");
             _helper.Register(() => WriteWindow, "w|write-window=", null, null, 2000, "The difference between sent/received write commands.");
             _helper.Register(() => PingWindow, "p|ping-window=", null, null, 2000, "The difference between sent/received ping commands.");
+            _helper.Register(() => Force, "f|force", null, null, false, "Force usage on non-recommended environments such as Boehm GC");
         }
 
         public string GetUsage()

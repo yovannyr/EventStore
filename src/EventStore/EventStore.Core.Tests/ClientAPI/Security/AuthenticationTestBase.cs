@@ -94,11 +94,11 @@ namespace EventStore.Core.Tests.ClientAPI.Security
                             Assert.IsTrue(msg.Success);
 
                             adminCreateEvent2.Set();
-                        }), SystemAccount.Principal, "adm", "Administrator User", new[] { SystemUserGroups.Admins}, "admpa$$"));
+                        }), SystemAccount.Principal, "adm", "Administrator User", new[] { SystemRoles.Admins}, "admpa$$"));
 
-            Assert.IsTrue(userCreateEvent1.Wait(120000), "User 1 creation failed");
-            Assert.IsTrue(userCreateEvent2.Wait(120000), "User 2 creation failed");
-            Assert.IsTrue(adminCreateEvent2.Wait(120000), "Administrator User creation failed");
+            Assert.IsTrue(userCreateEvent1.Wait(10000), "User 1 creation failed");
+            Assert.IsTrue(userCreateEvent2.Wait(10000), "User 2 creation failed");
+            Assert.IsTrue(adminCreateEvent2.Wait(10000), "Administrator User creation failed");
 
             Connection = TestConnection.Create(_node.TcpEndPoint, TcpType.Normal, _userCredentials);
             Connection.Connect();
@@ -119,23 +119,23 @@ namespace EventStore.Core.Tests.ClientAPI.Security
                                                        .SetMetadataWriteRole("user1"), new UserCredentials("adm", "admpa$$"));
             Connection.SetStreamMetadata("$system-adm", ExpectedVersion.NoStream,
                                          StreamMetadata.Build()
-                                                       .SetReadRole(SystemUserGroups.Admins)
-                                                       .SetWriteRole(SystemUserGroups.Admins)
-                                                       .SetMetadataReadRole(SystemUserGroups.Admins)
-                                                       .SetMetadataWriteRole(SystemUserGroups.Admins), new UserCredentials("adm", "admpa$$"));
+                                                       .SetReadRole(SystemRoles.Admins)
+                                                       .SetWriteRole(SystemRoles.Admins)
+                                                       .SetMetadataReadRole(SystemRoles.Admins)
+                                                       .SetMetadataWriteRole(SystemRoles.Admins), new UserCredentials("adm", "admpa$$"));
 
             Connection.SetStreamMetadata("normal-all", ExpectedVersion.NoStream,
                                          StreamMetadata.Build()
-                                                       .SetReadRole(SystemUserGroups.All)
-                                                       .SetWriteRole(SystemUserGroups.All)
-                                                       .SetMetadataReadRole(SystemUserGroups.All)
-                                                       .SetMetadataWriteRole(SystemUserGroups.All));
+                                                       .SetReadRole(SystemRoles.All)
+                                                       .SetWriteRole(SystemRoles.All)
+                                                       .SetMetadataReadRole(SystemRoles.All)
+                                                       .SetMetadataWriteRole(SystemRoles.All));
             Connection.SetStreamMetadata("$system-all", ExpectedVersion.NoStream,
                                          StreamMetadata.Build()
-                                                       .SetReadRole(SystemUserGroups.All)
-                                                       .SetWriteRole(SystemUserGroups.All)
-                                                       .SetMetadataReadRole(SystemUserGroups.All)
-                                                       .SetMetadataWriteRole(SystemUserGroups.All), new UserCredentials("adm", "admpa$$"));
+                                                       .SetReadRole(SystemRoles.All)
+                                                       .SetWriteRole(SystemRoles.All)
+                                                       .SetMetadataReadRole(SystemRoles.All)
+                                                       .SetMetadataWriteRole(SystemRoles.All), new UserCredentials("adm", "admpa$$"));
         }
 
         [TestFixtureTearDown]
@@ -207,14 +207,18 @@ namespace EventStore.Core.Tests.ClientAPI.Security
 
         protected void SubscribeToStream(string streamId, string login, string password)
         {
-            Connection.SubscribeToStream(streamId, false, (x, y) => { }, (x, y, z) => { },
-                                         login == null && password == null ? null : new UserCredentials(login, password));
+            using (Connection.SubscribeToStream(streamId, false, (x, y) => { }, (x, y, z) => { },
+                                                login == null && password == null ? null : new UserCredentials(login, password)))
+            {
+            }
         }
 
         protected void SubscribeToAll(string login, string password)
         {
-            Connection.SubscribeToAll(false, (x, y) => { }, (x, y, z) => { },
-                                      login == null && password == null ? null : new UserCredentials(login, password));
+            using (Connection.SubscribeToAll(false, (x, y) => { }, (x, y, z) => { },
+                                             login == null && password == null ? null : new UserCredentials(login, password)))
+            {
+            }
         }
 
         protected string CreateStreamWithMeta(StreamMetadata metadata, string streamPrefix = null)
@@ -227,7 +231,7 @@ namespace EventStore.Core.Tests.ClientAPI.Security
 
         protected void DeleteStream(string streamId, string login, string password)
         {
-            Connection.DeleteStream(streamId, ExpectedVersion.Any, 
+            Connection.DeleteStream(streamId, ExpectedVersion.Any, true, 
                                     login == null && password == null ? null : new UserCredentials(login, password));
         }
 

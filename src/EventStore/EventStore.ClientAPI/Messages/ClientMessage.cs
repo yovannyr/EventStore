@@ -15,7 +15,7 @@ using ProtoBuf;
 
 namespace EventStore.ClientAPI.Messages
 {
-  public static partial class ClientMessage
+  internal static partial class ClientMessage
   {
   [Serializable, ProtoContract(Name=@"NewEvent")]
   public partial class NewEvent
@@ -175,13 +175,17 @@ namespace EventStore.ClientAPI.Messages
     [ProtoMember(3, IsRequired = true, Name=@"first_event_number", DataFormat = DataFormat.TwosComplement)]
     public readonly int FirstEventNumber;
   
+    [ProtoMember(4, IsRequired = true, Name=@"last_event_number", DataFormat = DataFormat.TwosComplement)]
+    public readonly int LastEventNumber;
+  
     private WriteEventsCompleted() {}
   
-    public WriteEventsCompleted(OperationResult result, string message, int firstEventNumber)
+    public WriteEventsCompleted(OperationResult result, string message, int firstEventNumber, int lastEventNumber)
     {
         Result = result;
         Message = message;
         FirstEventNumber = firstEventNumber;
+        LastEventNumber = lastEventNumber;
     }
   }
   
@@ -197,13 +201,17 @@ namespace EventStore.ClientAPI.Messages
     [ProtoMember(3, IsRequired = true, Name=@"require_master", DataFormat = DataFormat.Default)]
     public readonly bool RequireMaster;
   
+    [ProtoMember(4, IsRequired = false, Name=@"hard_delete", DataFormat = DataFormat.Default)]
+    public readonly bool? HardDelete;
+  
     private DeleteStream() {}
   
-    public DeleteStream(string eventStreamId, int expectedVersion, bool requireMaster)
+    public DeleteStream(string eventStreamId, int expectedVersion, bool requireMaster, bool? hardDelete)
     {
         EventStreamId = eventStreamId;
         ExpectedVersion = expectedVersion;
         RequireMaster = requireMaster;
+        HardDelete = hardDelete;
     }
   }
   
@@ -343,13 +351,21 @@ namespace EventStore.ClientAPI.Messages
     [ProtoMember(3, IsRequired = false, Name=@"message", DataFormat = DataFormat.Default)]
     public readonly string Message;
   
+    [ProtoMember(4, IsRequired = true, Name=@"first_event_number", DataFormat = DataFormat.TwosComplement)]
+    public readonly int FirstEventNumber;
+  
+    [ProtoMember(5, IsRequired = true, Name=@"last_event_number", DataFormat = DataFormat.TwosComplement)]
+    public readonly int LastEventNumber;
+  
     private TransactionCommitCompleted() {}
   
-    public TransactionCommitCompleted(long transactionId, OperationResult result, string message)
+    public TransactionCommitCompleted(long transactionId, OperationResult result, string message, int firstEventNumber, int lastEventNumber)
     {
         TransactionId = transactionId;
         Result = result;
         Message = message;
+        FirstEventNumber = firstEventNumber;
+        LastEventNumber = lastEventNumber;
     }
   }
   
@@ -746,6 +762,54 @@ namespace EventStore.ClientAPI.Messages
     {
         Reason = reason;
         AdditionalInfo = additionalInfo;
+    }
+  }
+  
+  [Serializable, ProtoContract(Name=@"ScavengeDatabase")]
+  public partial class ScavengeDatabase
+  {
+    public ScavengeDatabase()
+    {
+    }
+  }
+  
+  [Serializable, ProtoContract(Name=@"ScavengeDatabaseCompleted")]
+  public partial class ScavengeDatabaseCompleted
+  {
+    [ProtoMember(1, IsRequired = true, Name=@"result", DataFormat = DataFormat.TwosComplement)]
+    public readonly ScavengeDatabaseCompleted.ScavengeResult Result;
+  
+    [ProtoMember(2, IsRequired = false, Name=@"error", DataFormat = DataFormat.Default)]
+    public readonly string Error;
+  
+    [ProtoMember(3, IsRequired = true, Name=@"total_time_ms", DataFormat = DataFormat.TwosComplement)]
+    public readonly int TotalTimeMs;
+  
+    [ProtoMember(4, IsRequired = true, Name=@"total_space_saved", DataFormat = DataFormat.TwosComplement)]
+    public readonly long TotalSpaceSaved;
+  
+    [ProtoContract(Name=@"ScavengeResult")]
+    public enum ScavengeResult
+    {
+            
+      [ProtoEnum(Name=@"Success", Value=0)]
+      Success = 0,
+            
+      [ProtoEnum(Name=@"InProgress", Value=1)]
+      InProgress = 1,
+            
+      [ProtoEnum(Name=@"Failed", Value=2)]
+      Failed = 2
+    }
+  
+    private ScavengeDatabaseCompleted() {}
+  
+    public ScavengeDatabaseCompleted(ScavengeDatabaseCompleted.ScavengeResult result, string error, int totalTimeMs, long totalSpaceSaved)
+    {
+        Result = result;
+        Error = error;
+        TotalTimeMs = totalTimeMs;
+        TotalSpaceSaved = totalSpaceSaved;
     }
   }
   

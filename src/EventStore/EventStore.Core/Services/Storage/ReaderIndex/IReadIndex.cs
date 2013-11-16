@@ -28,34 +28,38 @@
 
 using System.Security.Principal;
 using EventStore.Core.Data;
-using EventStore.Core.TransactionLog.LogRecords;
 
 namespace EventStore.Core.Services.Storage.ReaderIndex
 {
     public interface IReadIndex
     {
         long LastCommitPosition { get; }
+        IIndexWriter IndexWriter { get; }
 
-        void Init(long writerCheckpoint, long buildToPosition);
-        void Commit(CommitLogRecord record);
+        void Init(long buildToPosition);
         ReadIndexStats GetStatistics();
         
         IndexReadEventResult ReadEvent(string streamId, int eventNumber);
         IndexReadStreamResult ReadStreamEventsBackward(string streamId, int fromEventNumber, int maxCount);
         IndexReadStreamResult ReadStreamEventsForward(string streamId, int fromEventNumber, int maxCount);
+        /// <summary>
+        /// Returns event records in the sequence they were committed into TF.
+        /// Positions is specified as pre-positions (pointer at the beginning of the record).
+        /// </summary>
         IndexReadAllResult ReadAllEventsForward(TFPos pos, int maxCount);
+        /// <summary>
+        /// Returns event records in the reverse sequence they were committed into TF.
+        /// Positions is specified as post-positions (pointer after the end of record).
+        /// </summary>
         IndexReadAllResult ReadAllEventsBackward(TFPos pos, int maxCount);
 
         bool IsStreamDeleted(string streamId);
-        int GetLastStreamEventNumber(string streamId);
-        StreamAccessResult CheckStreamAccess(string streamId, StreamAccessType streamAccessType, IPrincipal user);
+        int GetStreamLastEventNumber(string streamId);
         StreamMetadata GetStreamMetadata(string streamId);
 
-        CommitCheckResult CheckCommitStartingAt(long transactionPosition, long commitPosition);
+        string GetEventStreamIdByTransactionId(long transactionId);
+        StreamAccess CheckStreamAccess(string streamId, StreamAccessType streamAccessType, IPrincipal user);
 
-        void UpdateTransactionInfo(long transactionId, TransactionInfo transactionInfo);
-        TransactionInfo GetTransactionInfo(long writerCheckpoint, long transactionId);
-       
         void Close();
         void Dispose();
     }

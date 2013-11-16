@@ -33,6 +33,7 @@ using EventStore.Core.Bus;
 using EventStore.Core.Messages;
 using EventStore.Core.Messaging;
 using EventStore.Core.Services.Storage.ReaderIndex;
+using EventStore.Core.TransactionLog.LogRecords;
 
 namespace EventStore.Core.Services.RequestManager.Managers
 {
@@ -97,20 +98,17 @@ namespace EventStore.Core.Services.RequestManager.Managers
             if (_requestType != RequestType.TransactionStart || _request == null)
                 throw new Exception(string.Format("TransactionStart request manager invariant violation: reqType: {0}, req: {1}.", _requestType, _request));
 
-            switch (message.AccessResult)
+            if (message.AccessResult.Granted)
             {
-                case StreamAccessResult.Granted:
-                    _bus.Publish(new StorageMessage.WriteTransactionStart(
-                        _internalCorrId, _publishEnvelope, _request.EventStreamId, _request.ExpectedVersion,
-                        liveUntil: _nextTimeoutTime - TwoPhaseRequestManagerBase.TimeoutOffset));
-                    _request = null;
-                    break;
-                case StreamAccessResult.Denied:
-                    CompleteFailedRequest(OperationResult.AccessDenied, "Access denied.");
-                    break;
-                default: throw new Exception(string.Format("Unexpected SecurityAccessResult '{0}'.", message.AccessResult));
+                _bus.Publish(new StorageMessage.WriteTransactionStart(
+                    _internalCorrId, _publishEnvelope, _request.EventStreamId, _request.ExpectedVersion,
+                    liveUntil: _nextTimeoutTime - TwoPhaseRequestManagerBase.TimeoutOffset));
+                _request = null;
             }
-
+            else
+            {
+                CompleteFailedRequest(OperationResult.AccessDenied, "Access denied.");
+            }
         }
 
         public void Handle(ClientMessage.TransactionWrite request)
@@ -134,6 +132,9 @@ namespace EventStore.Core.Services.RequestManager.Managers
         {
             if (_completed)
                 return;
+            if (message.Flags.HasNoneOf(PrepareFlags.TransactionBegin))
+                throw new Exception(string.Format("Unexpected PrepareAck with flags [{0}] arrived (LogPosition: {1}, InternalCorrId: {2:B}, ClientCorrId: {3:B}).",
+                                                  message.Flags, message.LogPosition, message.CorrelationId, _clientCorrId));
             _transactionId = message.LogPosition;
             CompleteSuccessRequest();
         }

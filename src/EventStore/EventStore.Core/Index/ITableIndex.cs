@@ -34,7 +34,7 @@ namespace EventStore.Core.Index
         long CommitCheckpoint { get; }
         long PrepareCheckpoint { get; }
 
-        void Initialize(long writerCheckpoint);
+        void Initialize(long chaserCheckpoint);
         void Close(bool removeFiles = true);
 
         void Add(long commitPos, uint stream, int version, long position);
@@ -42,6 +42,7 @@ namespace EventStore.Core.Index
         
         bool TryGetOneValue(uint stream, int version, out long position);
         bool TryGetLatestEntry(uint stream, out IndexEntry entry);
+        bool TryGetOldestEntry(uint stream, out IndexEntry entry);
 
         IEnumerable<IndexEntry> GetRange(uint stream, int startVersion, int endVersion);
     }

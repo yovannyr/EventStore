@@ -27,7 +27,6 @@
 // 
 
 using System;
-using System.Text;
 using EventStore.Common.Utils;
 using EventStore.Core.Data;
 using EventStore.Core.DataStructures;
@@ -35,6 +34,7 @@ using EventStore.Core.Index;
 using EventStore.Core.Services;
 using EventStore.Core.Services.Storage.ReaderIndex;
 using EventStore.Core.Tests.Fakes;
+using EventStore.Core.TransactionLog;
 using EventStore.Core.TransactionLog.Checkpoint;
 using EventStore.Core.TransactionLog.Chunks;
 using EventStore.Core.TransactionLog.FileNamingStrategy;
@@ -95,28 +95,29 @@ namespace EventStore.Core.Tests.Services.Storage
             ChaserCheckpoint.Write(WriterCheckpoint.Read());
             ChaserCheckpoint.Flush();
 
+            var readers = new ObjectPool<ITransactionFileReader>("Readers", 2, 2, () => new TFChunkReader(Db, Db.Config.WriterCheckpoint));
             TableIndex = new TableIndex(GetFilePathFor("index"),
                                         () => new HashListMemTable(MaxEntriesInMemTable * 2),
+                                        () => new TFReaderLease(readers),
                                         MaxEntriesInMemTable);
 
+            var hasher = new ByLengthHasher();
             ReadIndex = new ReadIndex(new NoopPublisher(),
-                                      2,
-                                      2,
-                                      () => new TFChunkReader(Db, Db.Config.WriterCheckpoint),
+                                      readers,
                                       TableIndex,
-                                      new ByLengthHasher(),
-                                      new NoLRUCache<string, StreamCacheInfo>(),
+                                      hasher,
+                                      0,
                                       additionalCommitChecks: true,
                                       metastreamMaxCount: MetastreamMaxCount);
 
-            ReadIndex.Init(WriterCheckpoint.Read(), ChaserCheckpoint.Read());
+            ReadIndex.Init(ChaserCheckpoint.Read());
 
             // scavenge must run after readIndex is built
             if (_scavenge)
             {
                 if (_completeLastChunkOnScavenge)
                     Db.Manager.GetChunk(Db.Manager.ChunksCount - 1).Complete();
-                _scavenger = new TFChunkScavenger(Db, ReadIndex);
+                _scavenger = new TFChunkScavenger(Db, TableIndex, hasher, ReadIndex);
                 _scavenger.Scavenge(alwaysKeepScavenged: true, mergeChunks: _mergeChunks);
             }
         }
@@ -335,9 +336,7 @@ namespace EventStore.Core.Tests.Services.Storage
         protected EventRecord WriteDelete(string eventStreamId)
         {
             var prepare = LogRecord.DeleteTombstone(WriterCheckpoint.ReadNonFlushed(),
-                                                    Guid.NewGuid(),
-                                                    eventStreamId,
-                                                    ExpectedVersion.Any);
+                                                    Guid.NewGuid(), Guid.NewGuid(), eventStreamId, ExpectedVersion.Any);
             long pos;
             Assert.IsTrue(Writer.Write(prepare, out pos));
             var commit = LogRecord.Commit(WriterCheckpoint.ReadNonFlushed(),
@@ -352,9 +351,7 @@ namespace EventStore.Core.Tests.Services.Storage
         protected PrepareLogRecord WriteDeletePrepare(string eventStreamId)
         {
             var prepare = LogRecord.DeleteTombstone(WriterCheckpoint.ReadNonFlushed(),
-                                                    Guid.NewGuid(),
-                                                    eventStreamId,
-                                                    ExpectedVersion.Any);
+                                                    Guid.NewGuid(), Guid.NewGuid(), eventStreamId, ExpectedVersion.Any);
             long pos;
             Assert.IsTrue(Writer.Write(prepare, out pos));
 

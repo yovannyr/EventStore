@@ -26,7 +26,6 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
-using System;
 using System.Collections.Generic;
 using EventStore.Core.Data;
 using EventStore.Core.Messages;
@@ -38,6 +37,7 @@ using NUnit.Framework;
 
 namespace EventStore.Core.Tests.Services.Replication.DeleteStream
 {
+    [TestFixture]
     public class when_delete_stream_gets_already_committed : RequestManagerSpecification
     {
         protected override TwoPhaseRequestManagerBase OnManager(FakePublisher publisher)
@@ -47,7 +47,7 @@ namespace EventStore.Core.Tests.Services.Replication.DeleteStream
 
         protected override IEnumerable<Message> WithInitialMessages()
         {
-            yield return new ClientMessage.DeleteStream(InternalCorrId, ClientCorrId, Envelope, true, "test123", ExpectedVersion.Any, null);
+            yield return new ClientMessage.DeleteStream(InternalCorrId, ClientCorrId, Envelope, true, "test123", ExpectedVersion.Any, true, null);
         }
 
         protected override Message When()

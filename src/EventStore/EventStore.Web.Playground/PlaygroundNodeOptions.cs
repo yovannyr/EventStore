@@ -45,12 +45,12 @@ namespace EventStore.Web.Playground
         public string DbPath { get { return _helper.Get(() => DbPath); } }
         public int WorkerThreads { get { return _helper.Get(() => WorkerThreads); } }
         public string[] HttpPrefixes { get { return _helper.Get(() => HttpPrefixes); } }
-
+        public bool Force { get { return false; } }
         private readonly OptsHelper _helper;
 
         public PlaygroundNodeOptions()
         {
-            _helper = new OptsHelper(() => Configs, Opts.EnvPrefix);
+            _helper = new OptsHelper(() => Configs, Opts.EnvPrefix, "config.json");
 
             _helper.Register(() => ShowHelp, Opts.ShowHelpCmd, Opts.ShowHelpEnv, Opts.ShowHelpJson, Opts.ShowHelpDefault, Opts.ShowHelpDescr);
             _helper.Register(() => ShowVersion, Opts.ShowVersionCmd, Opts.ShowVersionEnv, Opts.ShowVersionJson, Opts.ShowVersionDefault, Opts.ShowVersionDescr);

@@ -26,7 +26,6 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
-using System;
 using System.Collections.Generic;
 using EventStore.Core.Messages;
 using EventStore.Core.Messaging;
@@ -38,6 +37,7 @@ using NUnit.Framework;
 
 namespace EventStore.Core.Tests.Services.Replication.TransactionCommit
 {
+    [TestFixture]
     public class when_transaction_commit_completes_successfully : RequestManagerSpecification
     {
         protected override TwoPhaseRequestManagerBase OnManager(FakePublisher publisher)
@@ -51,14 +51,14 @@ namespace EventStore.Core.Tests.Services.Replication.TransactionCommit
             yield return new StorageMessage.PrepareAck(InternalCorrId, 1, PrepareFlags.StreamDelete);
             yield return new StorageMessage.PrepareAck(InternalCorrId, 1, PrepareFlags.StreamDelete);
             yield return new StorageMessage.PrepareAck(InternalCorrId, 1, PrepareFlags.StreamDelete);
-            yield return new StorageMessage.CommitAck(InternalCorrId, 100, 2, 3);
-            yield return new StorageMessage.CommitAck(InternalCorrId, 100, 2, 3);
+            yield return new StorageMessage.CommitAck(InternalCorrId, 100, 2, 3, 3);
+            yield return new StorageMessage.CommitAck(InternalCorrId, 100, 2, 3, 3);
 
         }
 
         protected override Message When()
         {
-            return new StorageMessage.CommitAck(InternalCorrId, 100, 2, 3);
+            return new StorageMessage.CommitAck(InternalCorrId, 100, 2, 3, 3);
         }
 
         [Test]

@@ -59,7 +59,7 @@ namespace EventStore.Projections.Core.Tests.Services.event_reader.multi_stream_r
 
             _distibutionPointCorrelationId = Guid.NewGuid();
             _edp = new MultiStreamEventReader(
-                _bus, _distibutionPointCorrelationId, null, _abStreams, _ab12Tag, false, new RealTimeProvider());
+                _bus, _distibutionPointCorrelationId, null, 0, _abStreams, _ab12Tag, false, new RealTimeProvider());
 
             _edp.Resume();
         }
@@ -112,7 +112,7 @@ namespace EventStore.Projections.Core.Tests.Services.event_reader.multi_stream_r
                             DateTime.UtcNow,
                             PrepareFlags.SingleWrite | PrepareFlags.TransactionBegin | PrepareFlags.TransactionEnd,
                             "event_type", new byte[0], new byte[0]))
-                        }, null, "", 2, 4, false, 100));
+                        }, null, false, "", 2, 4, false, 100));
         }
     }
 }

@@ -43,7 +43,9 @@ namespace EventStore.Core
 {
     public abstract class ProgramBase<TOptions> where TOptions : IOptions, new()
     {
-        protected readonly ILogger Log = LogManager.GetLoggerFor<ProgramBase<TOptions>>();
+// ReSharper disable StaticFieldInGenericType
+        protected static readonly ILogger Log = LogManager.GetLoggerFor<ProgramBase<TOptions>>();
+// ReSharper restore StaticFieldInGenericType
 
         private int _exitCode;
         private readonly ManualResetEventSlim _exitEvent = new ManualResetEventSlim(false);
@@ -77,6 +79,7 @@ namespace EventStore.Core
                 else
                 {
                     Init(options);
+                    CommitSuicideIfInBoehmOrOnBadVersionsOfMono(options);
                     Create(options);
                     Start();
 
@@ -93,7 +96,7 @@ namespace EventStore.Core
             }
             catch (ApplicationInitializationException ex)
             {
-                Log.FatalException(ex, "Application initialization error: {0}.", FormatExceptionMessage(ex));
+                Log.FatalException(ex, "Application initialization error: {0}", FormatExceptionMessage(ex));
                 Application.Exit(ExitCode.Error, FormatExceptionMessage(ex));
             }
             catch (Exception ex)
@@ -110,8 +113,27 @@ namespace EventStore.Core
             return _exitCode;
         }
 
+        private void CommitSuicideIfInBoehmOrOnBadVersionsOfMono(TOptions options)
+        {
+            if(!options.Force)
+            {
+                if(GC.MaxGeneration == 0)
+                {
+                    Application.Exit(3, "Appears that we are running in mono with boehm GC this is generally not a good idea, please run with sgen instead." + 
+                        "to run with sgen use mono --gc=sgen. If you really want to run with boehm GC you can use --force to override this error.");
+                }
+                if(OS.IsUnix && !OS.GetRuntimeVersion().StartsWith("3"))
+                {
+                    Application.Exit(4, "Appears that we are running in linux with a version 2 build of mono. This is generally not a good idea." +
+                        "We recommend running with 3.0 or higher (3.2 especially). If you really want to run with this version of mono use --force to override this error.");
+                }
+            }
+        }
+
         private void Exit(int exitCode)
         {
+            LogManager.Finish();
+
             _exitCode = exitCode;
             _exitEvent.Set();
         }
@@ -160,35 +182,44 @@ namespace EventStore.Core
             return msg;
         }
 
-        protected static TFChunkDbConfig CreateDbConfig(string dbPath, int cachedChunks, long chunksCacheSize)
+        protected static TFChunkDbConfig CreateDbConfig(string dbPath, int cachedChunks, long chunksCacheSize, bool inMemDb)
         {
-            if (!Directory.Exists(dbPath)) // mono crashes without this check
-                Directory.CreateDirectory(dbPath);
-
             ICheckpoint writerChk;
             ICheckpoint chaserChk;
             ICheckpoint epochChk;
             ICheckpoint truncateChk;
 
-            var writerCheckFilename = Path.Combine(dbPath, Checkpoint.Writer + ".chk");
-            var chaserCheckFilename = Path.Combine(dbPath, Checkpoint.Chaser + ".chk");
-            var epochCheckFilename = Path.Combine(dbPath, Checkpoint.Epoch + ".chk");
-            var truncateCheckFilename = Path.Combine(dbPath, Checkpoint.Truncate + ".chk");
-            if (Runtime.IsMono)
+            if (inMemDb)
             {
-                writerChk = new FileCheckpoint(writerCheckFilename, Checkpoint.Writer, cached: true);
-                chaserChk = new FileCheckpoint(chaserCheckFilename, Checkpoint.Chaser, cached: true);
-                epochChk = new FileCheckpoint(epochCheckFilename, Checkpoint.Epoch, cached: true, initValue: -1);
-                truncateChk = new FileCheckpoint(truncateCheckFilename, Checkpoint.Truncate, cached: true, initValue: -1);
+                writerChk = new InMemoryCheckpoint(Checkpoint.Writer);
+                chaserChk = new InMemoryCheckpoint(Checkpoint.Chaser);
+                epochChk = new InMemoryCheckpoint(Checkpoint.Epoch, initValue: -1);
+                truncateChk = new InMemoryCheckpoint(Checkpoint.Truncate, initValue: -1);
             }
             else
             {
-                writerChk = new MemoryMappedFileCheckpoint(writerCheckFilename, Checkpoint.Writer, cached: true);
-                chaserChk = new MemoryMappedFileCheckpoint(chaserCheckFilename, Checkpoint.Chaser, cached: true);
-                epochChk = new MemoryMappedFileCheckpoint(epochCheckFilename, Checkpoint.Epoch, cached: true, initValue: -1);
-                truncateChk = new MemoryMappedFileCheckpoint(truncateCheckFilename, Checkpoint.Truncate, cached: true, initValue: -1);
-            }
+                if (!Directory.Exists(dbPath)) // mono crashes without this check
+                    Directory.CreateDirectory(dbPath);
 
+                var writerCheckFilename = Path.Combine(dbPath, Checkpoint.Writer + ".chk");
+                var chaserCheckFilename = Path.Combine(dbPath, Checkpoint.Chaser + ".chk");
+                var epochCheckFilename = Path.Combine(dbPath, Checkpoint.Epoch + ".chk");
+                var truncateCheckFilename = Path.Combine(dbPath, Checkpoint.Truncate + ".chk");
+                if (Runtime.IsMono)
+                {
+                    writerChk = new FileCheckpoint(writerCheckFilename, Checkpoint.Writer, cached: true);
+                    chaserChk = new FileCheckpoint(chaserCheckFilename, Checkpoint.Chaser, cached: true);
+                    epochChk = new FileCheckpoint(epochCheckFilename, Checkpoint.Epoch, cached: true, initValue: -1);
+                    truncateChk = new FileCheckpoint(truncateCheckFilename, Checkpoint.Truncate, cached: true, initValue: -1);
+                }
+                else
+                {
+                    writerChk = new MemoryMappedFileCheckpoint(writerCheckFilename, Checkpoint.Writer, cached: true);
+                    chaserChk = new MemoryMappedFileCheckpoint(chaserCheckFilename, Checkpoint.Chaser, cached: true);
+                    epochChk = new MemoryMappedFileCheckpoint(epochCheckFilename, Checkpoint.Epoch, cached: true, initValue: -1);
+                    truncateChk = new MemoryMappedFileCheckpoint(truncateCheckFilename, Checkpoint.Truncate, cached: true, initValue: -1);
+                }
+            }
             var cache = cachedChunks >= 0
                                 ? cachedChunks*(long)(TFConsts.ChunkSize + ChunkHeader.Size + ChunkFooter.Size)
                                 : chunksCacheSize;
@@ -199,7 +230,8 @@ namespace EventStore.Core
                                                  writerChk,
                                                  chaserChk,
                                                  epochChk,
-                                                 truncateChk);
+                                                 truncateChk,
+                                                 inMemDb);
             return nodeConfig;
         }
 

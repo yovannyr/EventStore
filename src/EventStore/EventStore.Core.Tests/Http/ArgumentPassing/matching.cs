@@ -1,8 +1,5 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Net;
-using System.Text;
 using EventStore.Core.Tests.Helpers;
 using NUnit.Framework;
 using Newtonsoft.Json.Linq;
@@ -50,6 +47,7 @@ namespace EventStore.Core.Tests.Http.ArgumentPassing
         }
 
         [TestFixture, Category("LongRunning")]
+        [Ignore("Only demonstrates differences between .NET and Mono")]
         class when_matching_against_placeholders_with_reserved_characters : HttpBehaviorSpecification
         {
             private JObject _response;
@@ -63,7 +61,6 @@ namespace EventStore.Core.Tests.Http.ArgumentPassing
             }
 
             [Test]
-			[Ignore("Only demonstrates differences between .NET and Mono")]
             // [TestCase("%24", "$", "2", "2")]
             // [TestCase("$", "$", "2", "2")]
             // [TestCase("%3F", "?", "2", "2")] // ?

@@ -28,6 +28,9 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Text;
 using System.Threading;
 using EventStore.Common.Log;
 using EventStore.Common.Utils;
@@ -40,11 +43,14 @@ using EventStore.Core.Services.Storage.EpochManager;
 using EventStore.Core.Services.Storage.ReaderIndex;
 using EventStore.Core.TransactionLog.Chunks;
 using EventStore.Core.TransactionLog.LogRecords;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace EventStore.Core.Services.Storage
 {
     public class StorageWriterService : IHandle<SystemMessage.SystemInit>,
                                         IHandle<SystemMessage.StateChangeMessage>,
+                                        IHandle<SystemMessage.WriteEpoch>,
                                         IHandle<SystemMessage.WaitForChaserToCatchUp>,
                                         IHandle<StorageMessage.WritePrepares>,
                                         IHandle<StorageMessage.WriteDelete>,
@@ -57,11 +63,11 @@ namespace EventStore.Core.Services.Storage
         private static readonly ILogger Log = LogManager.GetLoggerFor<StorageWriterService>();
 
         protected static readonly int TicksPerMs = (int)(Stopwatch.Frequency / 1000);
-        private static readonly TimeSpan WaitForChaserSingleIterationTimeout = TimeSpan.FromMilliseconds(100);
+        private static readonly TimeSpan WaitForChaserSingleIterationTimeout = TimeSpan.FromMilliseconds(200);
 
         protected readonly TFChunkDb Db;
         protected readonly TFChunkWriter Writer;
-        protected readonly IReadIndex ReadIndex;
+        private readonly IIndexWriter _indexWriter;
         protected readonly IEpochManager EpochManager;
 
         protected readonly IPublisher Bus;
@@ -70,7 +76,7 @@ namespace EventStore.Core.Services.Storage
         private readonly InMemoryBus _writerBus;
 
         private readonly Stopwatch _watch = Stopwatch.StartNew();
-        private readonly int _minFlushDelay;
+        private readonly double _minFlushDelay;
         private long _lastFlushDelay;
         private long _lastFlushTimestamp;
 
@@ -91,27 +97,26 @@ namespace EventStore.Core.Services.Storage
 
         public StorageWriterService(IPublisher bus, 
                                     ISubscriber subscribeToBus,
-                                    int minFlushDelayMs,
+                                    TimeSpan minFlushDelay,
                                     TFChunkDb db,
                                     TFChunkWriter writer, 
-                                    IReadIndex readIndex,
+                                    IIndexWriter indexWriter,
                                     IEpochManager epochManager)
         {
             Ensure.NotNull(bus, "bus");
             Ensure.NotNull(subscribeToBus, "subscribeToBus");
-            Ensure.Nonnegative(minFlushDelayMs, "minFlushDelayMs");
             Ensure.NotNull(db, "db");
             Ensure.NotNull(writer, "writer");
-            Ensure.NotNull(readIndex, "readIndex");
+            Ensure.NotNull(indexWriter, "indexWriter");
             Ensure.NotNull(epochManager, "epochManager");
 
             Bus = bus;
             _subscribeToBus = subscribeToBus;
             Db = db;
-            ReadIndex = readIndex;
+            _indexWriter = indexWriter;
             EpochManager = epochManager;
 
-            _minFlushDelay = minFlushDelayMs * TicksPerMs;
+            _minFlushDelay = minFlushDelay.TotalMilliseconds * TicksPerMs;
             _lastFlushDelay = 0;
             _lastFlushTimestamp = _watch.ElapsedTicks;
 
@@ -127,6 +132,7 @@ namespace EventStore.Core.Services.Storage
 
             SubscribeToMessage<SystemMessage.SystemInit>();
             SubscribeToMessage<SystemMessage.StateChangeMessage>();
+            SubscribeToMessage<SystemMessage.WriteEpoch>();
             SubscribeToMessage<SystemMessage.WaitForChaserToCatchUp>();
             SubscribeToMessage<StorageMessage.WritePrepares>();
             SubscribeToMessage<StorageMessage.WriteDelete>();
@@ -153,7 +159,7 @@ namespace EventStore.Core.Services.Storage
             {
                 StorageWriterQueue.Stop();
                 BlockWriter = true;
-                Bus.Publish(new SystemMessage.ServiceShutdown("StorageWriterService"));
+                Bus.Publish(new SystemMessage.ServiceShutdown("StorageWriter"));
             }
         }
 
@@ -187,14 +193,7 @@ namespace EventStore.Core.Services.Storage
 
         void IHandle<SystemMessage.SystemInit>.Handle(SystemMessage.SystemInit message)
         {
-            // We rebuild index till the chaser position, because
-            // everything else will be done by chaser as during replication
-            // with no concurrency issues with writer, as writer before jumping 
-            // into master-mode and accepting writes will wait till chaser caught up.
-            var writerCheckpoint = Db.Config.WriterCheckpoint.Read();
-            var chaserCheckpoint = Db.Config.ChaserCheckpoint.Read();
-            ReadIndex.Init(writerCheckpoint, chaserCheckpoint);
-            Bus.Publish(new SystemMessage.StorageWriterInitializationDone());
+            Bus.Publish(new SystemMessage.ServiceInitialized("StorageWriter"));
         }
 
         public virtual void Handle(SystemMessage.StateChangeMessage message)
@@ -205,6 +204,7 @@ namespace EventStore.Core.Services.Storage
             {
                 case VNodeState.Master:
                 {
+                    _indexWriter.Reset();
                     EpochManager.WriteNewEpoch(); // forces flush
                     break;
                 }
@@ -216,13 +216,22 @@ namespace EventStore.Core.Services.Storage
             }
         }
 
+        void IHandle<SystemMessage.WriteEpoch>.Handle(SystemMessage.WriteEpoch message)
+        {
+            if (_vnodeState != VNodeState.Master)
+                throw new Exception(string.Format("New Epoch request came not in master state!!! State: {0}.", _vnodeState));
+            EpochManager.WriteNewEpoch();
+            PurgeNotProcessedInfo();
+        }
+
         void IHandle<SystemMessage.WaitForChaserToCatchUp>.Handle(SystemMessage.WaitForChaserToCatchUp message)
         {
             // if we are in states, that doesn't need to wait for chaser, ignore
             if (_vnodeState != VNodeState.PreMaster && _vnodeState != VNodeState.PreReplica) 
                 throw new Exception(string.Format("{0} appeared in {1} state.", message.GetType().Name, _vnodeState));
 
-            Db.Config.WriterCheckpoint.Flush();
+            if (Writer.Checkpoint.Read() != Writer.Checkpoint.ReadNonFlushed())
+                Writer.Flush();
 
             var sw = Stopwatch.StartNew();
             while (Db.Config.ChaserCheckpoint.Read() < Db.Config.WriterCheckpoint.Read() && sw.Elapsed < WaitForChaserSingleIterationTimeout)
@@ -237,65 +246,180 @@ namespace EventStore.Core.Services.Storage
             }
 
             var totalTime = message.TotalTimeWasted + sw.Elapsed;
-            if (totalTime < TimeSpan.FromSeconds(5) || (int)totalTime.TotalSeconds % 5 == 0) // too verbose otherwise
+            if (totalTime < TimeSpan.FromSeconds(5) || (int)totalTime.TotalSeconds % 30 == 0) // too verbose otherwise
                 Log.Debug("Still waiting for chaser to catch up already for {0}...", totalTime);
             Bus.Publish(new SystemMessage.WaitForChaserToCatchUp(message.CorrelationId, totalTime));
         }
 
-        void IHandle<StorageMessage.WritePrepares>.Handle(StorageMessage.WritePrepares message)
+        void IHandle<StorageMessage.WritePrepares>.Handle(StorageMessage.WritePrepares msg)
         {
             Interlocked.Decrement(ref FlushMessagesInQueue);
 
             try
             {
-                if (message.LiveUntil < DateTime.UtcNow)
+                if (msg.LiveUntil < DateTime.UtcNow)
                     return;
 
+                string streamId = msg.EventStreamId;
+                var commitCheck = _indexWriter.CheckCommit(streamId, msg.ExpectedVersion, msg.Events.Select(x => x.EventId));
+                if (commitCheck.Decision != CommitDecision.Ok)
+                {
+                    ActOnCommitCheckFailure(msg.Envelope, msg.CorrelationId, commitCheck);
+                    return;
+                }
+
+                var prepares = new List<PrepareLogRecord>();
                 var logPosition = Writer.Checkpoint.ReadNonFlushed();
-                if (message.Events.Length > 0)
+                if (msg.Events.Length > 0)
                 {
                     var transactionPosition = logPosition;
-                    for (int i = 0; i < message.Events.Length; ++i)
+                    for (int i = 0; i < msg.Events.Length; ++i)
                     {
-                        var evnt = message.Events[i];
-                        var flags = PrepareFlags.Data;
+                        var evnt = msg.Events[i];
+                        var flags = PrepareFlags.Data | PrepareFlags.IsCommitted;
                         if (i == 0)
                             flags |= PrepareFlags.TransactionBegin;
-                        if (i == message.Events.Length - 1)
+                        if (i == msg.Events.Length - 1)
                             flags |= PrepareFlags.TransactionEnd;
                         if (evnt.IsJson)
                             flags |= PrepareFlags.IsJson;
 
-                        var expectedVersion = i == 0 ? message.ExpectedVersion : ExpectedVersion.Any;
-                        var res = WritePrepareWithRetry(LogRecord.Prepare(logPosition,
-                                                                          message.CorrelationId,
-                                                                          evnt.EventId,
-                                                                          transactionPosition,
-                                                                          i,
-                                                                          message.EventStreamId,
-                                                                          expectedVersion,
-                                                                          flags,
-                                                                          evnt.EventType,
-                                                                          evnt.Data,
-                                                                          evnt.Metadata));
+                        // when IsCommitted ExpectedVersion is always explicit
+                        var expectedVersion = commitCheck.CurrentVersion + i;
+                        var res = WritePrepareWithRetry(
+                            LogRecord.Prepare(logPosition, msg.CorrelationId, evnt.EventId,
+                                              transactionPosition, i, streamId,
+                                              expectedVersion, flags, evnt.EventType, evnt.Data, evnt.Metadata));
                         logPosition = res.NewPos;
                         if (i == 0)
                             transactionPosition = res.WrittenPos; // transaction position could be changed due to switching to new chunk
+                        prepares.Add(res.Prepare);
                     }
                 }
                 else
                 {
-                    WritePrepareWithRetry(LogRecord.Prepare(logPosition,
-                                                            message.CorrelationId,
-                                                            Guid.NewGuid(),
-                                                            logPosition,
-                                                            -1,
-                                                            message.EventStreamId,
-                                                            message.ExpectedVersion,
-                                                            PrepareFlags.TransactionBegin | PrepareFlags.TransactionEnd,
-                                                            null,
-                                                            Empty.ByteArray,
-                                                            Empty.ByteArray));
+                    WritePrepareWithRetry(
+                        LogRecord.Prepare(logPosition, msg.CorrelationId, Guid.NewGuid(), logPosition, -1,
+                                          streamId, commitCheck.CurrentVersion,
+                                          PrepareFlags.TransactionBegin | PrepareFlags.TransactionEnd | PrepareFlags.IsCommitted,
+                                          null, Empty.ByteArray, Empty.ByteArray));
+                }
+
+                bool softUndeleteMetastream = SystemStreams.IsMetastream(streamId)
+                                              && _indexWriter.IsSoftDeleted(SystemStreams.OriginalStreamOf(streamId));
+
+                _indexWriter.PreCommit(prepares);
+
+                if (commitCheck.IsSoftDeleted)
+                    SoftUndeleteStream(streamId, commitCheck.CurrentVersion + 1);
+                if (softUndeleteMetastream)
+                    SoftUndeleteMetastream(streamId);
+            }
+            catch (Exception exc)
+            {
+                Log.ErrorException(exc, "Exception in writer.");
+                throw;
+            }
+            finally
+            {
+                Flush();
+            }
+        }
+
+
+        private void SoftUndeleteMetastream(string metastreamId)
+        {
+            var origStreamId = SystemStreams.OriginalStreamOf(metastreamId);
+            var rawMetaInfo = _indexWriter.GetStreamRawMeta(origStreamId);
+            SoftUndeleteStream(origStreamId, rawMetaInfo.MetaLastEventNumber, rawMetaInfo.RawMeta,
+                               recreateFrom: _indexWriter.GetStreamLastEventNumber(origStreamId) + 1);
+        }
+
+        private void SoftUndeleteStream(string streamId, int recreateFromEventNumber)
+        {
+            var rawInfo = _indexWriter.GetStreamRawMeta(streamId);
+            SoftUndeleteStream(streamId, rawInfo.MetaLastEventNumber, rawInfo.RawMeta, recreateFromEventNumber);
+        }
+
+        private void SoftUndeleteStream(string streamId, int metaLastEventNumber, byte[] rawMeta, int recreateFrom)
+        {
+            byte[] modifiedMeta;
+            if (!SoftUndeleteRawMeta(rawMeta, recreateFrom, out modifiedMeta))
+                return;
+
+            var logPosition = Writer.Checkpoint.ReadNonFlushed();
+            var res = WritePrepareWithRetry(
+                LogRecord.Prepare(logPosition, Guid.NewGuid(), Guid.NewGuid(), logPosition, 0,
+                                  SystemStreams.MetastreamOf(streamId), metaLastEventNumber,
+                                  PrepareFlags.SingleWrite | PrepareFlags.IsCommitted | PrepareFlags.IsJson,
+                                  SystemEventTypes.StreamMetadata, modifiedMeta, Empty.ByteArray));
+
+            _indexWriter.PreCommit(new[] { res.Prepare });
+        }
+
+        public bool SoftUndeleteRawMeta(byte[] rawMeta, int recreateFromEventNumber, out byte[] modifiedMeta)
+        {
+            try
+            {
+                var jobj = JObject.Parse(Encoding.UTF8.GetString(rawMeta));
+                jobj[SystemMetadata.TruncateBefore] = recreateFromEventNumber;
+                using (var memoryStream = new MemoryStream())
+                {
+                    using (var jsonWriter = new JsonTextWriter(new StreamWriter(memoryStream)))
+                    {
+                        jobj.WriteTo(jsonWriter);
+                    }
+                    modifiedMeta = memoryStream.ToArray();
+                    return true;
+                }
+            }
+            catch (Exception)
+            {
+                modifiedMeta = null;
+                return false;
+            }
+
+        }
+
+        void IHandle<StorageMessage.WriteDelete>.Handle(StorageMessage.WriteDelete message)
+        {
+            Interlocked.Decrement(ref FlushMessagesInQueue);
+            try
+            {
+                if (message.LiveUntil < DateTime.UtcNow)
+                    return;
+
+                var eventId = Guid.NewGuid();
+                
+                var commitCheck = _indexWriter.CheckCommit(message.EventStreamId, message.ExpectedVersion, new[]{eventId});
+                if (commitCheck.Decision != CommitDecision.Ok)
+                {
+                    ActOnCommitCheckFailure(message.Envelope, message.CorrelationId, commitCheck);
+                    return;
+                }
+
+                if (message.HardDelete)
+                {
+                    // HARD DELETE
+                    const int expectedVersion = EventNumber.DeletedStream - 1;
+                    var record = LogRecord.DeleteTombstone(Writer.Checkpoint.ReadNonFlushed(), message.CorrelationId,
+                                                           eventId, message.EventStreamId, expectedVersion, PrepareFlags.IsCommitted);
+                    var res = WritePrepareWithRetry(record);
+                    _indexWriter.PreCommit(new[] { res.Prepare });
+                }
+                else 
+                {
+                    // SOFT DELETE
+                    var metastreamId = SystemStreams.MetastreamOf(message.EventStreamId);
+                    var expectedVersion = _indexWriter.GetStreamLastEventNumber(metastreamId);
+                    var logPosition = Writer.Checkpoint.ReadNonFlushed();
+                    const PrepareFlags flags = PrepareFlags.SingleWrite | PrepareFlags.IsCommitted | PrepareFlags.IsJson;
+                    var data = new StreamMetadata(truncateBefore: EventNumber.DeletedStream).ToJsonBytes();
+                    var res = WritePrepareWithRetry(
+                        LogRecord.Prepare(logPosition, message.CorrelationId, eventId, logPosition, 0,
+                                          metastreamId, expectedVersion, flags, SystemEventTypes.StreamMetadata,
+                                          data, null));
+                    _indexWriter.PreCommit(new[] { res.Prepare });
                 }
             }
             catch (Exception exc)
@@ -317,12 +441,14 @@ namespace EventStore.Core.Services.Storage
                 if (message.LiveUntil < DateTime.UtcNow)
                     return;
 
-                var logPosition = Writer.Checkpoint.ReadNonFlushed();
-                var record = LogRecord.TransactionBegin(logPosition, message.CorrelationId, message.EventStreamId, message.ExpectedVersion);
+                var record = LogRecord.TransactionBegin(Writer.Checkpoint.ReadNonFlushed(),
+                                                        message.CorrelationId,
+                                                        message.EventStreamId,
+                                                        message.ExpectedVersion);
                 var res = WritePrepareWithRetry(record);
 
                 // we update cache to avoid non-cached look-up on next TransactionWrite
-                ReadIndex.UpdateTransactionInfo(res.WrittenPos, new TransactionInfo(-1, message.EventStreamId)); 
+                _indexWriter.UpdateTransactionInfo(res.WrittenPos, res.WrittenPos, new TransactionInfo(-1, message.EventStreamId)); 
             }
             catch (Exception exc)
             {
@@ -341,12 +467,13 @@ namespace EventStore.Core.Services.Storage
             try
             {
                 var logPosition = Writer.Checkpoint.ReadNonFlushed();
-                var transactionInfo = ReadIndex.GetTransactionInfo(Writer.Checkpoint.Read(), message.TransactionId);
+                var transactionInfo = _indexWriter.GetTransactionInfo(Writer.Checkpoint.Read(), message.TransactionId);
                 if (!CheckTransactionInfo(message.TransactionId, transactionInfo))
                     return;
 
                 if (message.Events.Length > 0)
                 {
+                    long lastLogPosition = -1;
                     for (int i = 0; i < message.Events.Length; ++i)
                     {
                         var evnt = message.Events[i];
@@ -362,10 +489,11 @@ namespace EventStore.Core.Services.Storage
                                                                 evnt.IsJson);
                         var res = WritePrepareWithRetry(record);
                         logPosition = res.NewPos;
+                        lastLogPosition = res.WrittenPos;
                     }
-                    ReadIndex.UpdateTransactionInfo(message.TransactionId,
-                                                    new TransactionInfo(transactionInfo.TransactionOffset + message.Events.Length,
-                                                                        transactionInfo.EventStreamId));
+                    var info = new TransactionInfo(transactionInfo.TransactionOffset + message.Events.Length,
+                                                   transactionInfo.EventStreamId);
+                    _indexWriter.UpdateTransactionInfo(message.TransactionId, lastLogPosition, info);
                 }
             }
             catch (Exception exc)
@@ -387,7 +515,7 @@ namespace EventStore.Core.Services.Storage
                 if (message.LiveUntil < DateTime.UtcNow)
                     return;
 
-                var transactionInfo = ReadIndex.GetTransactionInfo(Writer.Checkpoint.Read(), message.TransactionId);
+                var transactionInfo = _indexWriter.GetTransactionInfo(Writer.Checkpoint.Read(), message.TransactionId);
                 if (!CheckTransactionInfo(message.TransactionId, transactionInfo))
                     return;
 
@@ -409,7 +537,7 @@ namespace EventStore.Core.Services.Storage
             }
         }
 
-        private bool CheckTransactionInfo(long transactionId, TransactionInfo transactionInfo)
+        private static bool CheckTransactionInfo(long transactionId, TransactionInfo transactionInfo)
         {
             if (transactionInfo.TransactionOffset < -1 || transactionInfo.EventStreamId.IsEmptyString())
             {
@@ -429,41 +557,28 @@ namespace EventStore.Core.Services.Storage
             try
             {
                 var commitPos = Writer.Checkpoint.ReadNonFlushed();
-                var result = ReadIndex.CheckCommitStartingAt(message.TransactionPosition, commitPos);
-                switch (result.Decision)
+                var commitCheck = _indexWriter.CheckCommitStartingAt(message.TransactionPosition, commitPos);
+                if (commitCheck.Decision != CommitDecision.Ok)
                 {
-                    case CommitDecision.Ok:
-                    {
-                        var commit = WriteCommitWithRetry(LogRecord.Commit(commitPos,
-                                                                           message.CorrelationId,
-                                                                           message.TransactionPosition,
-                                                                           result.CurrentVersion + 1));
-                        ReadIndex.Commit(commit);
-                        break;
-                    }
-                    case CommitDecision.WrongExpectedVersion:
-                        message.Envelope.ReplyWith(new StorageMessage.WrongExpectedVersion(message.CorrelationId));
-                        break;
-                    case CommitDecision.Deleted:
-                        message.Envelope.ReplyWith(new StorageMessage.StreamDeleted(message.CorrelationId));
-                        break;
-                    case CommitDecision.Idempotent:
-                        message.Envelope.ReplyWith(new StorageMessage.AlreadyCommitted(message.CorrelationId,
-                                                                                       result.EventStreamId,
-                                                                                       result.StartEventNumber,
-                                                                                       result.EndEventNumber));
-                        break;
-                    case CommitDecision.CorruptedIdempotency:
-                        // in case of corrupted idempotency (part of transaction is ok, other is different)
-                        // then we can say that the transaction is not idempotent, so WrongExpectedVersion is ok answer
-                        message.Envelope.ReplyWith(new StorageMessage.WrongExpectedVersion(message.CorrelationId));
-                        break;
-                    case CommitDecision.InvalidTransaction:
-                        message.Envelope.ReplyWith(new StorageMessage.InvalidTransaction(message.CorrelationId));
-                        break;
-                    default:
-                        throw new ArgumentOutOfRangeException();
+                    ActOnCommitCheckFailure(message.Envelope, message.CorrelationId, commitCheck);
+                    return;
                 }
+
+
+                var commit = WriteCommitWithRetry(LogRecord.Commit(commitPos,
+                                                                   message.CorrelationId,
+                                                                   message.TransactionPosition,
+                                                                   commitCheck.CurrentVersion + 1));
+
+                bool softUndeleteMetastream = SystemStreams.IsMetastream(commitCheck.EventStreamId)
+                                              && _indexWriter.IsSoftDeleted(SystemStreams.OriginalStreamOf(commitCheck.EventStreamId));
+               
+                _indexWriter.PreCommit(commit);
+
+                if (commitCheck.IsSoftDeleted)
+                    SoftUndeleteStream(commitCheck.EventStreamId, commitCheck.CurrentVersion + 1);
+                if (softUndeleteMetastream)
+                    SoftUndeleteMetastream(commitCheck.EventStreamId);
             }
             catch (Exception exc)
             {
@@ -476,28 +591,32 @@ namespace EventStore.Core.Services.Storage
             }
         }
 
-        void IHandle<StorageMessage.WriteDelete>.Handle(StorageMessage.WriteDelete message)
+        private static void ActOnCommitCheckFailure(IEnvelope envelope, Guid correlationId, CommitCheckResult result)
         {
-            Interlocked.Decrement(ref FlushMessagesInQueue);
-            try
+            switch (result.Decision)
             {
-                if (message.LiveUntil < DateTime.UtcNow)
-                    return;
-
-                var record = LogRecord.DeleteTombstone(Writer.Checkpoint.ReadNonFlushed(),
-                                                       message.CorrelationId,
-                                                       message.EventStreamId,
-                                                       message.ExpectedVersion);
-                WritePrepareWithRetry(record);
-            }
-            catch (Exception exc)
-            {
-                Log.ErrorException(exc, "Exception in writer.");
-                throw;
-            }
-            finally
-            {
-                Flush();
+                case CommitDecision.WrongExpectedVersion:
+                    envelope.ReplyWith(new StorageMessage.WrongExpectedVersion(correlationId));
+                    break;
+                case CommitDecision.Deleted:
+                    envelope.ReplyWith(new StorageMessage.StreamDeleted(correlationId));
+                    break;
+                case CommitDecision.Idempotent:
+                    envelope.ReplyWith(new StorageMessage.AlreadyCommitted(correlationId,
+                                                                           result.EventStreamId,
+                                                                           result.StartEventNumber,
+                                                                           result.EndEventNumber));
+                    break;
+                case CommitDecision.CorruptedIdempotency:
+                    // in case of corrupted idempotency (part of transaction is ok, other is different)
+                    // then we can say that the transaction is not idempotent, so WrongExpectedVersion is ok answer
+                    envelope.ReplyWith(new StorageMessage.WrongExpectedVersion(correlationId));
+                    break;
+                case CommitDecision.InvalidTransaction:
+                    envelope.ReplyWith(new StorageMessage.InvalidTransaction(correlationId));
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException();
             }
         }
 
@@ -505,21 +624,22 @@ namespace EventStore.Core.Services.Storage
         {
             long writtenPos = prepare.LogPosition;
             long newPos;
+            PrepareLogRecord record = prepare;
             if (!Writer.Write(prepare, out newPos))
             {
                 var transactionPos = prepare.TransactionPosition == prepare.LogPosition ? newPos : prepare.TransactionPosition;
-                var record = new PrepareLogRecord(newPos,
-                                                  prepare.CorrelationId,
-                                                  prepare.EventId,
-                                                  transactionPos,
-                                                  prepare.TransactionOffset,
-                                                  prepare.EventStreamId,
-                                                  prepare.ExpectedVersion,
-                                                  prepare.TimeStamp,
-                                                  prepare.Flags,
-                                                  prepare.EventType,
-                                                  prepare.Data,
-                                                  prepare.Metadata);
+                record = new PrepareLogRecord(newPos,
+                                              prepare.CorrelationId,
+                                              prepare.EventId,
+                                              transactionPos,
+                                              prepare.TransactionOffset,
+                                              prepare.EventStreamId,
+                                              prepare.ExpectedVersion,
+                                              prepare.TimeStamp,
+                                              prepare.Flags,
+                                              prepare.EventType,
+                                              prepare.Data,
+                                              prepare.Metadata);
                 writtenPos = newPos;
                 if (!Writer.Write(record, out newPos))
                 {
@@ -528,7 +648,7 @@ namespace EventStore.Core.Services.Storage
                                                       writtenPos));
                 }
             }
-            return new WriteResult(writtenPos, newPos);
+            return new WriteResult(writtenPos, newPos, record);
         }
 
         private CommitLogRecord WriteCommitWithRetry(CommitLogRecord commit)
@@ -586,20 +706,30 @@ namespace EventStore.Core.Services.Storage
                 Interlocked.Exchange(ref _maxFlushDelay, Math.Max(Interlocked.Read(ref _maxFlushDelay), flushDelay));
                 _statIndex = (_statIndex + 1) & (LastStatsCount - 1);
 
+                PurgeNotProcessedInfo();
+
                 return true;
             }
             return false;
+        }
+
+        private void PurgeNotProcessedInfo()
+        {
+            _indexWriter.PurgeNotProcessedCommitsTill(Db.Config.ChaserCheckpoint.Read());
+            _indexWriter.PurgeNotProcessedTransactions(Db.Config.WriterCheckpoint.Read());
         }
 
         private struct WriteResult
         {
             public readonly long WrittenPos;
             public readonly long NewPos;
+            public readonly PrepareLogRecord Prepare;
 
-            public WriteResult(long writtenPos, long newPos)
+            public WriteResult(long writtenPos, long newPos, PrepareLogRecord prepare)
             {
                 WrittenPos = writtenPos;
                 NewPos = newPos;
+                Prepare = prepare;
             }
         }
 

@@ -21,6 +21,7 @@
     <DefineConstants>TRACE;DEBUG</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
+    <DocumentationFile>..\..\..\bin\eventstore\debug\anycpu\EventStore.ClientAPI.xml</DocumentationFile>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
     <DebugType>pdbonly</DebugType>
@@ -29,6 +30,7 @@
     <DefineConstants>CLIENTAPI</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
+    <DocumentationFile>..\..\..\bin\eventstore\release\anycpu\EventStore.ClientAPI.xml</DocumentationFile>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x86'">
     <DebugSymbols>true</DebugSymbols>
@@ -103,6 +105,8 @@
     <Compile Include="ConnectionSettingsBuilder.cs" />
     <Compile Include="ClusterSettings.cs" />
     <Compile Include="ClusterSettingsBuilder.cs" />
+    <Compile Include="WriteResult.cs" />
+    <Compile Include="SystemSettings.cs" />
     <Compile Include="EventReadResult.cs" />
     <Compile Include="Core\EventStoreConnectionLogicHandler.cs" />
     <Compile Include="Core\IEndPointDiscoverer.cs" />
@@ -115,6 +119,7 @@
     <Compile Include="Exceptions\NotAuthenticatedException.cs" />
     <Compile Include="IEventStoreConnection.cs" />
     <Compile Include="Core\IEventStoreTransactionConnection.cs" />
+    <Compile Include="StreamAcl.cs" />
     <Compile Include="SubscriptionDropReason.cs" />
     <Compile Include="Exceptions\AccessDeniedException.cs" />
     <Compile Include="StreamMetadata.cs" />

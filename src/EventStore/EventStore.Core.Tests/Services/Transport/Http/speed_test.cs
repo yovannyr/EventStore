@@ -127,7 +127,7 @@ namespace EventStore.Core.Tests.Services.Transport.Http
         {
             if (_router == null)
             {
-                _http.RegisterControllerAction(new ControllerAction(route, verb, Codec.NoCodecs, SupportedCodecs), (x, y) =>
+                _http.RegisterAction(new ControllerAction(route, verb, Codec.NoCodecs, SupportedCodecs), (x, y) =>
                 {
                     x.Reply(new byte[0], 200, "", "", Helper.UTF8NoBom, null, e => new Exception());
                     CountdownEvent.Signal();
@@ -135,9 +135,10 @@ namespace EventStore.Core.Tests.Services.Transport.Http
             }
             else
             {
-                _router.RegisterControllerAction(new ControllerAction(route, verb, Codec.NoCodecs, SupportedCodecs), (x, y) =>
+                _router.RegisterAction(new ControllerAction(route, verb, Codec.NoCodecs, SupportedCodecs), (x, y) =>
                 {
                     CountdownEvent.Signal();
+                    return new RequestParams(TimeSpan.Zero);
                 });
             }
 
@@ -164,7 +165,7 @@ namespace EventStore.Core.Tests.Services.Transport.Http
             var bus = InMemoryBus.CreateTest();
             var queue = new QueuedHandlerThreadPool(bus, "Test", true, TimeSpan.FromMilliseconds(50));
             var multiQueuedHandler = new MultiQueuedHandler(new IQueuedHandler[]{queue}, null);
-            var providers = new AuthenticationProvider[] {new AnonymousAuthenticationProvider()};
+            var providers = new HttpAuthenticationProvider[] {new AnonymousHttpAuthenticationProvider()};
             var httpService = new HttpService(ServiceAccessibility.Public, inputBus, 
                                               new TrieUriRouter(), multiQueuedHandler, "http://localhost:12345/");
             HttpService.CreateAndSubscribePipeline(bus, providers);

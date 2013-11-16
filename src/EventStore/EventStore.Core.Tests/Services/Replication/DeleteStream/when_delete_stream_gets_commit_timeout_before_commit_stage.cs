@@ -25,7 +25,6 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-using System;
 using System.Collections.Generic;
 using EventStore.Core.Data;
 using EventStore.Core.Messages;
@@ -37,7 +36,7 @@ using NUnit.Framework;
 
 namespace EventStore.Core.Tests.Services.Replication.DeleteStream
 {
-    [Ignore("There is no specialized prepare/commit timeout messages, so not possible to test this.")]
+    [TestFixture, Ignore("There is no specialized prepare/commit timeout messages, so not possible to test this.")]
     public class when_delete_stream_gets_commit_timeout_before_commit_stage : RequestManagerSpecification
     {
         protected override TwoPhaseRequestManagerBase OnManager(FakePublisher publisher)
@@ -47,7 +46,7 @@ namespace EventStore.Core.Tests.Services.Replication.DeleteStream
 
         protected override IEnumerable<Message> WithInitialMessages()
         {
-            yield return new ClientMessage.DeleteStream(InternalCorrId, ClientCorrId, Envelope, true, "test123", ExpectedVersion.Any, null);
+            yield return new ClientMessage.DeleteStream(InternalCorrId, ClientCorrId, Envelope, true, "test123", ExpectedVersion.Any, true, null);
             yield return new StorageMessage.PrepareAck(InternalCorrId, 1, PrepareFlags.SingleWrite);
             yield return new StorageMessage.PrepareAck(InternalCorrId, 1, PrepareFlags.SingleWrite);
         }

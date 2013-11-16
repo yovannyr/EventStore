@@ -37,6 +37,7 @@ using NUnit.Framework;
 
 namespace EventStore.Core.Tests.Services.Replication.WriteStream
 {
+    [TestFixture]
     public class when_write_stream_gets_already_committed : RequestManagerSpecification
     {
         protected override TwoPhaseRequestManagerBase OnManager(FakePublisher publisher)

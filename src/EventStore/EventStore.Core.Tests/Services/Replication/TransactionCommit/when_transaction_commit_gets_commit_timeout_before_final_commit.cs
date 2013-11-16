@@ -38,6 +38,7 @@ using NUnit.Framework;
 
 namespace EventStore.Core.Tests.Services.Replication.TransactionCommit
 {
+    [TestFixture]
     public class when_transaction_commit_gets_commit_timeout_before_final_commit : RequestManagerSpecification
     {
         protected override TwoPhaseRequestManagerBase OnManager(FakePublisher publisher)
@@ -51,7 +52,7 @@ namespace EventStore.Core.Tests.Services.Replication.TransactionCommit
             yield return new StorageMessage.PrepareAck(InternalCorrId, 1, PrepareFlags.SingleWrite);
             yield return new StorageMessage.PrepareAck(InternalCorrId, 1, PrepareFlags.SingleWrite);
             yield return new StorageMessage.PrepareAck(InternalCorrId, 1, PrepareFlags.SingleWrite);
-            yield return new StorageMessage.CommitAck(InternalCorrId, 3, 2, 3);
+            yield return new StorageMessage.CommitAck(InternalCorrId, 3, 2, 3, 3);
         }
 
         protected override Message When()

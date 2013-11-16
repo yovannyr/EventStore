@@ -34,6 +34,7 @@ using System.Threading;
 using EventStore.Common.Log;
 using EventStore.Common.Utils;
 using EventStore.Core.Exceptions;
+using EventStore.Core.TransactionLog;
 using EventStore.Core.Util;
 
 namespace EventStore.Core.Index
@@ -53,8 +54,10 @@ namespace EventStore.Core.Index
         private readonly int _maxSizeForMemory;
         private readonly int _maxTablesPerLevel;
         private readonly bool _additionalReclaim;
+        private readonly bool _inMem;
         private readonly string _directory;
         private readonly Func<IMemTable> _memTableFactory;
+        private readonly Func<TFReaderLease> _tfReaderFactory;
         private readonly IIndexFilenameProvider _fileNameProvider;
 
         private readonly object _awaitingTablesLock = new object();
@@ -70,34 +73,47 @@ namespace EventStore.Core.Index
         private bool _initialized;
 
         public TableIndex(string directory, 
-                          Func<IMemTable> memTableFactory, 
+                          Func<IMemTable> memTableFactory,
+                          Func<TFReaderLease> tfReaderFactory,
                           int maxSizeForMemory = 1000000,
                           int maxTablesPerLevel = 4,
-                          bool additionalReclaim = false)
+                          bool additionalReclaim = false,
+                          bool inMem = false)
         {
             Ensure.NotNullOrEmpty(directory, "directory");
             Ensure.NotNull(memTableFactory, "memTableFactory");
+            Ensure.NotNull(tfReaderFactory, "tfReaderFactory");
             if (maxTablesPerLevel <= 1)
                 throw new ArgumentOutOfRangeException("maxTablesPerLevel");
 
             _directory = directory;
             _memTableFactory = memTableFactory;
+            _tfReaderFactory = tfReaderFactory;
             _fileNameProvider = new GuidFilenameProvider(directory);
             _maxSizeForMemory = maxSizeForMemory;
             _maxTablesPerLevel = maxTablesPerLevel;
             _additionalReclaim = additionalReclaim;
+            _inMem = inMem;
             _awaitingMemTables = new List<TableItem> { new TableItem(_memTableFactory(), -1, -1) };
         }
 
-        public void Initialize(long writerCheckpoint)
+        public void Initialize(long chaserCheckpoint)
         {
-            Ensure.Nonnegative(writerCheckpoint, "writerCheckpoint");
+            Ensure.Nonnegative(chaserCheckpoint, "chaserCheckpoint");
 
             //NOT THREAD SAFE (assumes one thread)
             if (_initialized)
                 throw new IOException("TableIndex is already initialized.");           
             _initialized = true;
             
+            if (_inMem)
+            {
+                _indexMap = IndexMap.CreateEmpty(_maxTablesPerLevel);
+                _prepareCheckpoint = _indexMap.PrepareCheckpoint;
+                _commitCheckpoint = _indexMap.CommitCheckpoint;
+                return;
+            }
+
             CreateIfDoesNotExist(_directory);
             var indexmapFile = Path.Combine(_directory, IndexMapFilename);
             var backupFile = Path.Combine(_directory, IndexMapBackupFilename);
@@ -109,8 +125,8 @@ namespace EventStore.Core.Index
             {
                 if (IsCorrupt(_directory))
                     throw new CorruptIndexException("IndexMap is in unsafe state.");
-                _indexMap = IndexMap.FromFile(indexmapFile, IsHashCollision, _maxTablesPerLevel);
-                if (_indexMap.CommitCheckpoint >= writerCheckpoint)
+                _indexMap = IndexMap.FromFile(indexmapFile, _maxTablesPerLevel);
+                if (_indexMap.CommitCheckpoint >= chaserCheckpoint)
                 {
                     _indexMap.Dispose(TimeSpan.FromMilliseconds(5000));
                     throw new CorruptIndexException("IndexMap's CommitCheckpoint is greater than WriterCheckpoint.");
@@ -129,8 +145,8 @@ namespace EventStore.Core.Index
                     File.Copy(backupFile, indexmapFile);
                     try
                     {
-                        _indexMap = IndexMap.FromFile(indexmapFile, IsHashCollision, _maxTablesPerLevel);
-                        if (_indexMap.CommitCheckpoint >= writerCheckpoint)
+                        _indexMap = IndexMap.FromFile(indexmapFile, _maxTablesPerLevel);
+                        if (_indexMap.CommitCheckpoint >= chaserCheckpoint)
                         {
                             _indexMap.Dispose(TimeSpan.FromMilliseconds(5000));
                             throw new CorruptIndexException("Back-up IndexMap's CommitCheckpoint is still greater than WriterCheckpoint.");
@@ -148,7 +164,7 @@ namespace EventStore.Core.Index
                 }
 
                 if (createEmptyIndexMap)
-                    _indexMap = IndexMap.FromFile(indexmapFile, IsHashCollision, _maxTablesPerLevel);
+                    _indexMap = IndexMap.FromFile(indexmapFile, _maxTablesPerLevel);
                 if (IsCorrupt(_directory))
                     LeaveUnsafeState(_directory);
             }
@@ -200,15 +216,6 @@ namespace EventStore.Core.Index
             }
         }
 
-        private bool IsHashCollision(IndexEntry entry)
-        {
-            // TODO AN fails on case where one stream is already deleted, and another is present, but both have same hash
-            using (var enumerator = GetRange(entry.Stream, 0, 0).GetEnumerator())
-            {
-                return enumerator.MoveNext() && enumerator.MoveNext(); // at least two entries -- hash collision
-            }
-        }
-
         private static void CreateIfDoesNotExist(string directory)
         {
             if (!Directory.Exists(directory))
@@ -226,9 +233,9 @@ namespace EventStore.Core.Index
 
         public void AddEntries(long commitPos, IList<IndexEntry> entries)
         {
-            Ensure.Nonnegative(commitPos, "commitPos");
-            Ensure.NotNull(entries, "entries");
-            Ensure.Positive(entries.Count, "entries.Count");
+            //Ensure.Nonnegative(commitPos, "commitPos");
+            //Ensure.NotNull(entries, "entries");
+            //Ensure.Positive(entries.Count, "entries.Count");
 
             //should only be called on a single thread.
             var table = (IMemTable)_awaitingMemTables[0].Table; // always a memtable
@@ -252,15 +259,18 @@ namespace EventStore.Core.Index
                     Log.Trace("Switching MemTable, currently: {0} awaiting tables.", newTables.Count);
 
                     _awaitingMemTables = newTables;
-                    if (!_backgroundRunning)
+                    if (!_inMem)
                     {
-                        _backgroundRunningEvent.Reset();
-                        _backgroundRunning = true;
-                        ThreadPool.QueueUserWorkItem(x => ReadOffQueue());
-                    }
+                        if (!_backgroundRunning)
+                        {
+                            _backgroundRunningEvent.Reset();
+                            _backgroundRunning = true;
+                            ThreadPool.QueueUserWorkItem(x => ReadOffQueue());
+                        }
 
-                    if (_additionalReclaim)
-                        ThreadPool.QueueUserWorkItem(x => ReclaimMemoryIfNeeded(_awaitingMemTables));
+                        if (_additionalReclaim)
+                            ThreadPool.QueueUserWorkItem(x => ReclaimMemoryIfNeeded(_awaitingMemTables));
+                    }
                 }
             }
         }
@@ -279,12 +289,12 @@ namespace EventStore.Core.Index
                         if (_awaitingMemTables.Count == 1)
                         {
                             _backgroundRunning = false;
-                            _backgroundRunningEvent.Set(); 
+                            _backgroundRunningEvent.Set();
                             return;
                         }
                         tableItem = _awaitingMemTables[_awaitingMemTables.Count - 1];
                     }
-                    
+
                     PTable ptable;
                     var memtable = tableItem.Table as IMemTable;
                     if (memtable != null)
@@ -310,14 +320,19 @@ namespace EventStore.Core.Index
                             using (var f = File.Create(backupFile))
                             {
                                 f.Write(indexmapContent, 0, indexmapContent.Length);
-                                f.Flush(flushToDisk: true);
+                                f.FlushToDisk();
                             }
                         }
                     });
 
                     EnterUnsafeState(_directory);
 
-                    var mergeResult = _indexMap.AddFile(ptable, tableItem.PrepareCheckpoint, tableItem.CommitCheckpoint, _fileNameProvider);
+                    MergeResult mergeResult;
+                    using (var reader = _tfReaderFactory())
+                    {
+                        mergeResult = _indexMap.AddPTable(ptable, tableItem.PrepareCheckpoint, tableItem.CommitCheckpoint,
+                                                          entry => reader.ExistsAt(entry.Position), _fileNameProvider);
+                    }
                     _indexMap = mergeResult.MergedMap;
                     _indexMap.SaveToFile(indexmapFile);
 
@@ -334,7 +349,7 @@ namespace EventStore.Core.Index
                         // so if we have another PTable instance with same ID,
                         // we need to kill that instance as we added ours already
                         if (!ReferenceEquals(corrTable.Table, ptable) && corrTable.Table is PTable)
-                            ((PTable)corrTable.Table).MarkForDestruction(); 
+                            ((PTable)corrTable.Table).MarkForDestruction();
 
                         Log.Trace("There are now {0} awaiting tables.", memTables.Count);
                         _awaitingMemTables = memTables;
@@ -345,6 +360,10 @@ namespace EventStore.Core.Index
                     // from last step, not to do full rebuild.
                     mergeResult.ToDelete.ForEach(x => x.MarkForDestruction());
                 }
+            }
+            catch (FileBeingDeletedException exc)
+            {
+                Log.ErrorException(exc, "Couldn't acquire chunk in TableIndex.ReadOffQueue. It is ok if node is shutting down.");
             }
             catch (Exception exc)
             {
@@ -467,6 +486,44 @@ namespace EventStore.Core.Index
             return false;
         }
 
+        public bool TryGetOldestEntry(uint stream, out IndexEntry entry)
+        {
+            int counter = 0;
+            while (counter < 5)
+            {
+                counter++;
+                try
+                {
+                    return TryGetOldestEntryInternal(stream, out entry);
+                }
+                catch (FileBeingDeletedException)
+                {
+                    Log.Trace("File being deleted.");
+                }
+            }
+            throw new InvalidOperationException("Something is wrong. Files are locked.");
+        }
+
+        private bool TryGetOldestEntryInternal(uint stream, out IndexEntry entry)
+        {
+            var map = _indexMap;
+            foreach (var table in map.InReverseOrder())
+            {
+                if (table.TryGetOldestEntry(stream, out entry))
+                    return true;
+            }
+
+            var awaiting = _awaitingMemTables;
+            for (int index = awaiting.Count - 1; index >= 0; index--)
+            {
+                if (awaiting[index].Table.TryGetOldestEntry(stream, out entry))
+                    return true;
+            }
+
+            entry = InvalidIndexEntry;
+            return false;
+        }
+
         public IEnumerable<IndexEntry> GetRange(uint stream, int startVersion, int endVersion)
         {
             int counter = 0;
@@ -551,7 +608,8 @@ namespace EventStore.Core.Index
             //this should also make sure that no background tasks are running anymore
             if (!_backgroundRunningEvent.Wait(7000))
                 throw new TimeoutException("Could not finish background thread in reasonable time.");
-
+            if (_inMem)
+                return;
             if (_indexMap != null)
             {
                 if (removeFiles)
@@ -579,7 +637,7 @@ namespace EventStore.Core.Index
             {
                 using (var f = File.Create(Path.Combine(directory, "merging.m")))
                 {
-                    f.Flush(flushToDisk: true);
+                    f.FlushToDisk();
                 }
             }
         }

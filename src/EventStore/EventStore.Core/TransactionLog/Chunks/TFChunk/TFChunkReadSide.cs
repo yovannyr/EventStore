@@ -29,6 +29,7 @@
 using System;
 using System.IO;
 using EventStore.Common.Utils;
+using EventStore.Core.Data;
 using EventStore.Core.Exceptions;
 using EventStore.Core.TransactionLog.LogRecords;
 
@@ -41,6 +42,7 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk
             void Cache();
             void Uncache();
 
+            bool ExistsAt(long logicalPosition);
             RecordReadResult TryReadAt(long logicalPosition);
             RecordReadResult TryReadFirst();
             RecordReadResult TryReadClosestForward(long logicalPosition);
@@ -64,6 +66,11 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk
             public void Uncache()
             {
                 // do nothing
+            }
+
+            public bool ExistsAt(long logicalPosition)
+            {
+                return logicalPosition >= 0 && logicalPosition < Chunk.LogicalDataSize;
             }
 
             public RecordReadResult TryReadAt(long logicalPosition)
@@ -230,6 +237,20 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk
                 }
             }
 
+            public bool ExistsAt(long logicalPosition)
+            {
+                var workItem = Chunk.GetReaderWorkItem();
+                try
+                {
+                    var actualPosition = TranslateExactPosition(workItem, logicalPosition);
+                    return actualPosition >= 0 && actualPosition < Chunk.PhysicalDataSize;
+                }
+                finally
+                {
+                    Chunk.ReturnReaderWorkItem(workItem);
+                }
+            }
+
             public RecordReadResult TryReadAt(long logicalPosition)
             {
                 var workItem = Chunk.GetReaderWorkItem();
@@ -283,7 +304,7 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk
                     return -1;
 
                 var recordRange = LocatePosRange(midpoints, pos);
-                return TranslateExactWithoutMidpoints(workItem, pos, recordRange.Item1, recordRange.Item2);
+                return TranslateExactWithoutMidpoints(workItem, pos, recordRange.Lower, recordRange.Upper);
             }
 
             public RecordReadResult TryReadFirst()
@@ -299,8 +320,7 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk
                 var workItem = Chunk.GetReaderWorkItem();
                 try
                 {
-                    var pos = TranslateClosestForwardPosition(workItem, logicalPosition);
-                    var actualPosition = pos.Item1;
+                    var actualPosition = TranslateClosestForwardPosition(workItem, logicalPosition);
                     if (actualPosition == -1 || actualPosition >= Chunk.PhysicalDataSize)
                         return RecordReadResult.Failure;
 
@@ -331,8 +351,7 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk
                 var workItem = Chunk.GetReaderWorkItem();
                 try
                 {
-                    var pos = TranslateClosestForwardPosition(workItem, logicalPosition);
-                    var actualPosition = pos.Item1;
+                    var actualPosition = TranslateClosestForwardPosition(workItem, logicalPosition);
                     // here we allow actualPosition == _physicalDataSize as we can read backward the very last record that way
                     if (actualPosition == -1 || actualPosition > Chunk.PhysicalDataSize)
                         return RecordReadResult.Failure;
@@ -351,7 +370,7 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk
                 }
             }
 
-            private Tuple<int, int> TranslateClosestForwardPosition(ReaderWorkItem workItem, long logicalPosition)
+            private int TranslateClosestForwardPosition(ReaderWorkItem workItem, long logicalPosition)
             {
                 var midpoints = _midpoints;
                 if (workItem.IsMemory || midpoints == null)
@@ -359,23 +378,23 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk
                 return TranslateClosestForwardWithMidpoints(workItem, midpoints, logicalPosition);
             }
 
-            private Tuple<int, int> TranslateClosestForwardWithMidpoints(ReaderWorkItem workItem, Midpoint[] midpoints, long pos)
+            private int TranslateClosestForwardWithMidpoints(ReaderWorkItem workItem, Midpoint[] midpoints, long pos)
             {
                 // to allow backward reading of the last record, forward read will decline anyway
                 if (pos > midpoints[midpoints.Length - 1].LogPos)
-                    return Tuple.Create(Chunk.PhysicalDataSize, midpoints.Length); 
+                    return Chunk.PhysicalDataSize; 
 
                 var recordRange = LocatePosRange(midpoints, pos);
-                return TranslateClosestForwardWithoutMidpoints(workItem, pos, recordRange.Item1, recordRange.Item2);
+                return TranslateClosestForwardWithoutMidpoints(workItem, pos, recordRange.Lower, recordRange.Upper);
             }
 
-            private Tuple<int, int> TranslateClosestForwardWithoutMidpoints(ReaderWorkItem workItem, long pos, int startIndex, int endIndex)
+            private int TranslateClosestForwardWithoutMidpoints(ReaderWorkItem workItem, long pos, int startIndex, int endIndex)
             {
                 PosMap res = ReadPosMap(workItem, endIndex);
 
                 // to allow backward reading of the last record, forward read will decline anyway
                 if (pos > res.LogPos)
-                    return Tuple.Create(Chunk.PhysicalDataSize, endIndex + 1); 
+                    return Chunk.PhysicalDataSize; 
 
                 int low = startIndex;
                 int high = endIndex;
@@ -392,14 +411,14 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk
                         res = v;
                     }
                 }
-                return Tuple.Create(res.ActualPos, high);
+                return res.ActualPos;
             }
 
-            private static Tuple<int, int> LocatePosRange(Midpoint[] midpoints, long pos)
+            private static Range LocatePosRange(Midpoint[] midpoints, long pos)
             {
                 int lowerMidpoint = LowerMidpointBound(midpoints, pos);
                 int upperMidpoint = UpperMidpointBound(midpoints, pos);
-                return Tuple.Create(midpoints[lowerMidpoint].ItemIndex, midpoints[upperMidpoint].ItemIndex);
+                return new Range(midpoints[lowerMidpoint].ItemIndex, midpoints[upperMidpoint].ItemIndex);
             }
 
             /// <summary>
@@ -467,25 +486,21 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk
                 {
                     throw new ArgumentException(
                         string.Format("Log record at actual pos {0} has non-positive length: {1}. "
-                                      + "Something is seriously wrong in chunk {2}-{3} ({4}).",
-                                      actualPosition, length,
-                                      Chunk.ChunkHeader.ChunkStartNumber, Chunk.ChunkHeader.ChunkEndNumber, Chunk.FileName));
+                                      + "Something is seriously wrong in chunk {2}.", actualPosition, length, Chunk));
                 }
                 if (length > TFConsts.MaxLogRecordSize)
                 {
                     throw new ArgumentException(
                         string.Format("Log record at actual pos {0} has too large length: {1} bytes, "
-                                      + "while limit is {2} bytes. Something is seriously wrong in chunk {3}-{4} ({5}).",
-                                      actualPosition, length, TFConsts.MaxLogRecordSize, 
-                                      Chunk.ChunkHeader.ChunkStartNumber, Chunk.ChunkHeader.ChunkEndNumber, Chunk.FileName));
+                                      + "while limit is {2} bytes. Something is seriously wrong in chunk {3}.",
+                                      actualPosition, length, TFConsts.MaxLogRecordSize, Chunk));
                 }
                 if (actualPosition + length + 2 * sizeof(int) > Chunk.PhysicalDataSize)
                 {
                     throw new UnableToReadPastEndOfStreamException(
                         string.Format("There is not enough space to read full record (length prefix: {0}). "
-                                      + "Actual pre-position: {1}. Something is seriously wrong in chunk {2}-{3} ({4}).",
-                                      length, actualPosition, 
-                                      Chunk.ChunkHeader.ChunkStartNumber, Chunk.ChunkHeader.ChunkEndNumber, Chunk.FileName));
+                                      + "Actual pre-position: {1}. Something is seriously wrong in chunk {2}.",
+                                      length, actualPosition, Chunk));
                 }
 
                 record = LogRecord.ReadFrom(workItem.Reader);
@@ -496,9 +511,8 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk
                 {
                     throw new Exception(
                         string.Format("Prefix/suffix length inconsistency: prefix length({0}) != suffix length ({1}).\n"
-                                      + "Actual pre-position: {2}. Something is seriously wrong in chunk {3}-{4} ({5}).",
-                                      length, suffixLength, actualPosition, 
-                                      Chunk.ChunkHeader.ChunkStartNumber, Chunk.ChunkHeader.ChunkEndNumber, Chunk.FileName));
+                                      + "Actual pre-position: {2}. Something is seriously wrong in chunk {3}.",
+                                      length, suffixLength, actualPosition, Chunk));
                 }
 
                 return true;
@@ -520,25 +534,22 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk
                 {
                     throw new ArgumentException(
                         string.Format("Log record that ends at actual pos {0} has non-positive length: {1}. "
-                                      + "Something is seriously wrong in chunk {2}-{3} ({4}).",
-                                      actualPosition, length,
-                                      Chunk.ChunkHeader.ChunkStartNumber, Chunk.ChunkHeader.ChunkEndNumber, Chunk.FileName));
+                                      + "Something is seriously wrong in chunk {2}.",
+                                      actualPosition, length, Chunk));
                 }
                 if (length > TFConsts.MaxLogRecordSize)
                 {
                     throw new ArgumentException(
                         string.Format("Log record that ends at actual pos {0} has too large length: {1} bytes, "
-                                      + "while limit is {2} bytes. Something is seriously wrong in chunk {3}-{4} ({5}).",
-                                      actualPosition, length, TFConsts.MaxLogRecordSize,
-                                      Chunk.ChunkHeader.ChunkStartNumber, Chunk.ChunkHeader.ChunkEndNumber, Chunk.FileName));
+                                      + "while limit is {2} bytes. Something is seriously wrong in chunk {3}.",
+                                      actualPosition, length, TFConsts.MaxLogRecordSize, Chunk));
                 }
                 if (actualPosition < length + 2 * sizeof(int)) // no space for record + length prefix and suffix 
                 {
                     throw new UnableToReadPastEndOfStreamException(
                         string.Format("There is not enough space to read full record (length suffix: {0}). "
-                                      + "Actual post-position: {1}. Something is seriously wrong in chunk {2}-{3} ({4}).",
-                                      length, actualPosition,
-                                      Chunk.ChunkHeader.ChunkStartNumber, Chunk.ChunkHeader.ChunkEndNumber, Chunk.FileName));
+                                      + "Actual post-position: {1}. Something is seriously wrong in chunk {2}.",
+                                      length, actualPosition, Chunk));
                 }
 
                 workItem.Stream.Position = realPos - length - 2*sizeof(int);
@@ -549,9 +560,8 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk
                 {
                     throw new Exception(
                             string.Format("Prefix/suffix length inconsistency: prefix length({0}) != suffix length ({1})"
-                                          + "Actual post-position: {2}. Something is seriously wrong in chunk {3}-{4} ({5}).",
-                                          prefixLength, length, actualPosition,
-                                          Chunk.ChunkHeader.ChunkStartNumber, Chunk.ChunkHeader.ChunkEndNumber, Chunk.FileName));
+                                          + "Actual post-position: {2}. Something is seriously wrong in chunk {3}.",
+                                          prefixLength, length, actualPosition, Chunk));
                 }
                 record = LogRecord.ReadFrom(workItem.Reader);
 

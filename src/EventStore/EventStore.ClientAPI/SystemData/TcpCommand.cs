@@ -27,7 +27,7 @@
 // 
 namespace EventStore.ClientAPI.SystemData
 {
-    public enum TcpCommand: byte
+    internal enum TcpCommand: byte
     {
         HeartbeatRequestCommand = 0x01,
         HeartbeatResponseCommand = 0x02,
@@ -84,6 +84,7 @@ namespace EventStore.ClientAPI.SystemData
         SubscriptionDropped = 0xC4,
 
         ScavengeDatabase = 0xD0,
+        ScavengeDatabaseCompleted = 0xD1,
 
         BadRequest = 0xF0,
         NotHandled = 0xF1,

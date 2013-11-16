@@ -45,19 +45,22 @@ namespace EventStore.Common.Options
     {
         static OptsHelper()
         {
-            TypeDescriptor.AddAttributes(typeof(IPAddress), new TypeConverterAttribute(typeof(IPAddressTypeConverter)));
+	        TypeDescriptor.AddAttributes(typeof (IPAddress), new TypeConverterAttribute(typeof (IPAddressTypeConverter)));
+	        TypeDescriptor.AddAttributes(typeof (IPEndPoint), new TypeConverterAttribute(typeof (IPEndPointTypeConverter)));
         }
 
         private readonly string _envPrefix;
+	    private readonly string _defaultJsonConfigFile;
         private readonly string _configMember;
         private readonly OptionSet _optionSet;
         private readonly Dictionary<string, IOptionContainer> _optionContainers = new Dictionary<string, IOptionContainer>();
 
-        public OptsHelper(Expression<Func<string[]>> configs, string envPrefix)
+        public OptsHelper(Expression<Func<string[]>> configs, string envPrefix, string defaultJsonConfigFile)
         {
             Ensure.NotNull(envPrefix, "envPrefix");
 
             _envPrefix = envPrefix;
+	        _defaultJsonConfigFile = defaultJsonConfigFile;
             _configMember = configs == null ? null : MemberName(configs);
             _optionSet = new OptionSet();
         }
@@ -74,7 +77,7 @@ namespace EventStore.Common.Options
         }
         
         public void Register<T>(Expression<Func<T>> member, string cmdPrototype, string envName, string jsonPath,
-                                T? @default = null, string description = null, bool hidden = false)
+                                T? @default = null, string description = null, bool hidden = false, bool stopParseIfSet=false)
             where T : struct
         {
             Ensure.NotNull(member, "member");
@@ -86,7 +89,8 @@ namespace EventStore.Common.Options
                                                      cmdPrototype,
                                                      GetEnvVarName(envName),
                                                      GetJsonPath(jsonPath),
-                                                     (bool?)(object)@default);
+                                                     (bool?)(object)@default, 
+                                                     stopParseIfSet);
                 _optionContainers.Add(optionName, option);
                 if (cmdPrototype.IsNotEmptyString())
                     _optionSet.Add(cmdPrototype, description, option.ParsingFromCmdLine, hidden);
@@ -163,6 +167,11 @@ namespace EventStore.Common.Options
         {
             var excessArguments = _optionSet.Parse(args).ToArray();
 
+            if (_optionContainers.Values.Any(optionContainer => optionContainer.DontParseFurther))
+            {
+                return excessArguments;
+            }
+
             foreach (var optionContainer in _optionContainers.Values)
             {
                 if (optionContainer.IsSet)
@@ -186,7 +195,11 @@ namespace EventStore.Common.Options
             }
 
             // add default configs, if they exist
-            jsonConfigPaths.Add(Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "config.json"));
+	        var pwd = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+			if (pwd != null)
+			{
+				jsonConfigPaths.Add(Path.Combine(pwd, _defaultJsonConfigFile));
+			}
 
             foreach (var configPath in jsonConfigPaths.Where(File.Exists))
             {

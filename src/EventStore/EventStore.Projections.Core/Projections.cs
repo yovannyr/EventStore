@@ -28,6 +28,7 @@
 
 using System.Collections.Generic;
 using System.Linq;
+using EventStore.Common.Options;
 using EventStore.Core;
 using EventStore.Core.Bus;
 using EventStore.Core.Messages;
@@ -142,9 +143,14 @@ namespace EventStore.Projections.Core
                         Forwarder.Create<CoreProjectionManagementMessage.Faulted>(_managerInputQueue));
                     projectionNode.CoreOutput.Subscribe(
                         Forwarder.Create<CoreProjectionManagementMessage.Prepared>(_managerInputQueue));
+                    projectionNode.CoreOutput.Subscribe(
+                        Forwarder.Create<CoreProjectionManagementMessage.SlaveProjectionReaderAssigned>(
+                            _managerInputQueue));
+                    projectionNode.CoreOutput.Subscribe(
+                        Forwarder.Create<ProjectionManagementMessage.ControlMessage>(_managerInputQueue));
 
                 }
-                projectionNode.CoreOutput.Subscribe(timerService);
+                projectionNode.CoreOutput.Subscribe<TimerMessage.Schedule>(timerService);
 
 
                 projectionNode.CoreOutput.Subscribe(Forwarder.Create<Message>(coreQueue)); // forward all
@@ -172,7 +178,7 @@ namespace EventStore.Projections.Core
                     Forwarder.Create<ProjectionManagementMessage.RequestSystemProjections>(mainQueue));
                 _projectionManagerNode.Output.Subscribe(Forwarder.Create<Message>(_managerInputQueue));
 
-                _projectionManagerNode.Output.Subscribe(timerService);
+                _projectionManagerNode.Output.Subscribe<TimerMessage.Schedule>(timerService);
 
                 // self forward all
 

@@ -24,17 +24,16 @@
 // THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-// 
 
 using System;
 using System.Linq;
 using EventStore.Common.Log;
 using EventStore.Common.Utils;
+using EventStore.Core.Authentication;
 using EventStore.Core.Bus;
 using EventStore.Core.Data;
 using EventStore.Core.Helpers;
 using EventStore.Core.Messages;
-using EventStore.Core.Services.Transport.Http.Authentication;
 using ReadStreamResult = EventStore.Core.Data.ReadStreamResult;
 
 namespace EventStore.Core.Services.UserManagement
@@ -130,7 +129,7 @@ namespace EventStore.Core.Services.UserManagement
                 message,
                 (completed, data) =>
                 _ioDispatcher.DeleteStream(
-                    "$user-" + message.LoginName, completed.FromEventNumber, SystemAccount.Principal,
+                    "$user-" + message.LoginName, completed.FromEventNumber, true, SystemAccount.Principal,
                     streamCompleted =>
                     WritePasswordChangedEventConditionalAnd(
                         message, true, () => ReplyByWriteResult(message, streamCompleted.Result))));
@@ -282,9 +281,10 @@ namespace EventStore.Core.Services.UserManagement
         private void BeginWritePasswordChangedEvent(
             string loginName, Action<ClientMessage.WriteEventsCompleted> completed)
         {
+            var streamMetadata =
+                new Lazy<StreamMetadata>(() => new StreamMetadata(null, TimeSpan.FromHours(1), null, null));
             _ioDispatcher.ConfigureStreamAndWriteEvents(
-                UserPasswordNotificationsStreamId, ExpectedVersion.Any,
-                new Lazy<StreamMetadata>(() => new StreamMetadata(null, TimeSpan.FromHours(1), null, null)),
+                UserPasswordNotificationsStreamId, ExpectedVersion.Any, streamMetadata,
                 new[] {CreatePasswordChangedEvent(loginName)}, SystemAccount.Principal, completed);
         }
 
@@ -355,7 +355,7 @@ namespace EventStore.Core.Services.UserManagement
             _ioDispatcher.UpdateStreamAcl(
                 "$user-" + loginName, ExpectedVersion.Any, SystemAccount.Principal,
                 new StreamMetadata(
-                    null, null, null, new StreamAcl(null, SystemUserGroups.Admins, SystemUserGroups.Admins, null, SystemUserGroups.Admins)),
+                    null, null, null, null, null, new StreamAcl(null, SystemRoles.Admins, SystemRoles.Admins, null, SystemRoles.Admins)),
                 onCompleted);
         }
 
@@ -456,7 +456,7 @@ namespace EventStore.Core.Services.UserManagement
         private void CreateAdminUser()
         {
             var userData = CreateUserData(
-                SystemUsers.Admin, "Event Store Administrator", new[] {SystemUserGroups.Admins},
+                SystemUsers.Admin, "Event Store Administrator", new[] {SystemRoles.Admins},
                 SystemUsers.DefaultAdminPassword);
             WriteStreamAcl(
                 SystemUsers.Admin, completed1 =>
@@ -498,7 +498,7 @@ namespace EventStore.Core.Services.UserManagement
 
         private bool DemandAdmin(UserManagementMessage.UserManagementRequestMessage message)
         {
-            if (message.Principal == null || !message.Principal.IsInRole(SystemUserGroups.Admins))
+            if (message.Principal == null || !message.Principal.IsInRole(SystemRoles.Admins))
             {
                 ReplyUnauthorized(message);
                 return false;

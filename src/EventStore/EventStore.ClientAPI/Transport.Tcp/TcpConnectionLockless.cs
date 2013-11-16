@@ -29,7 +29,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
@@ -43,6 +42,7 @@ namespace EventStore.ClientAPI.Transport.Tcp
                                                                   Guid connectionId, 
                                                                   IPEndPoint remoteEndPoint, 
                                                                   TcpClientConnector connector, 
+                                                                  TimeSpan connectionTimeout,
                                                                   Action<ITcpConnection> onConnectionEstablished, 
                                                                   Action<ITcpConnection, SocketError> onConnectionFailed,
                                                                   Action<ITcpConnection, SocketError> onConnectionClosed)
@@ -64,7 +64,7 @@ namespace EventStore.ClientAPI.Transport.Tcp
                                   {
                                       if (onConnectionFailed != null)
                                           onConnectionFailed(connection, socketError);
-                                  }, connection);
+                                  }, connection, connectionTimeout);
 // ReSharper restore ImplicitlyCapturedClosure
             return connection;
         }
@@ -80,7 +80,7 @@ namespace EventStore.ClientAPI.Transport.Tcp
         private SocketAsyncEventArgs _sendSocketArgs;
 
         private readonly Common.Concurrent.ConcurrentQueue<ArraySegment<byte>> _sendQueue = new Common.Concurrent.ConcurrentQueue<ArraySegment<byte>>();
-        private readonly Common.Concurrent.ConcurrentQueue<Tuple<ArraySegment<byte>, int>> _receiveQueue = new Common.Concurrent.ConcurrentQueue<Tuple<ArraySegment<byte>, int>>();
+        private readonly Common.Concurrent.ConcurrentQueue<ArraySegment<byte>> _receiveQueue = new Common.Concurrent.ConcurrentQueue<ArraySegment<byte>>();
         private readonly MemoryStream _memoryStream = new MemoryStream();
 
         private int _sending;
@@ -273,8 +273,8 @@ namespace EventStore.ClientAPI.Transport.Tcp
             
             NotifyReceiveCompleted(socketArgs.BytesTransferred);
             
-            var dataBuffer = new ArraySegment<byte>(socketArgs.Buffer, socketArgs.Offset, socketArgs.BytesTransferred);
-            _receiveQueue.Enqueue(Tuple.Create(dataBuffer, socketArgs.Count));
+            var data = new ArraySegment<byte>(socketArgs.Buffer, socketArgs.Offset, socketArgs.BytesTransferred);
+            _receiveQueue.Enqueue(data);
             socketArgs.SetBuffer(null, 0, 0);
 
             StartReceive();
@@ -294,20 +294,19 @@ namespace EventStore.ClientAPI.Transport.Tcp
                         throw new Exception("Some threading issue in TryDequeueReceivedData! Callback is null!");
                     }
 
-                    var dequeueResultList = new List<Tuple<ArraySegment<byte>, int>>(_receiveQueue.Count);
-                    Tuple<ArraySegment<byte>, int> piece;
+                    var res = new List<ArraySegment<byte>>(_receiveQueue.Count);
+                    ArraySegment<byte> piece;
                     while (_receiveQueue.TryDequeue(out piece))
                     {
-                        dequeueResultList.Add(piece);
+                        res.Add(piece);
                     }
 
-                    callback(this, dequeueResultList.Select(v => v.Item1));
-
+                    callback(this, res);
+                    
                     int bytes = 0;
-                    for (int i = 0, n = dequeueResultList.Count; i < n; ++i)
+                    for (int i = 0, n = res.Count; i < n; ++i)
                     {
-                        var tuple = dequeueResultList[i];
-                        bytes += tuple.Item1.Count;
+                        bytes += res[i].Count;
                     }
                     NotifyReceiveDispatched(bytes);
                 }
@@ -325,13 +324,13 @@ namespace EventStore.ClientAPI.Transport.Tcp
             if (Interlocked.CompareExchange(ref _closed, 1, 0) != 0)
                 return;
             NotifyClosed();
-            _log.Info("[{0:HH:mm:ss.fff}: N{1}, L{2}, {3:B}]:\nReceived bytes: {4}, Sent bytes: {5}\n"
+            _log.Info("ClientAPI {12} closed [{0:HH:mm:ss.fff}: N{1}, L{2}, {3:B}]:\nReceived bytes: {4}, Sent bytes: {5}\n"
                       + "Send calls: {6}, callbacks: {7}\nReceive calls: {8}, callbacks: {9}\nClose reason: [{10}] {11}\n",
                       DateTime.UtcNow, RemoteEndPoint, LocalEndPoint, _connectionId,
                       TotalBytesReceived, TotalBytesSent,
                       SendCalls, SendCallbacks,
                       ReceiveCalls, ReceiveCallbacks,
-                      socketError, reason);
+                      socketError, reason, GetType().Name);
             CloseSocket();
             if (Interlocked.CompareExchange(ref _sending, 1, 0) == 0)
                 ReturnSendingSocketArgs();

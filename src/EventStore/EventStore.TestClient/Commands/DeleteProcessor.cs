@@ -60,7 +60,7 @@ namespace EventStore.TestClient.Commands
                 {
                     context.Log.Info("[{0}, L{1}]: Trying to delete event stream '{2}'...", conn.RemoteEndPoint, conn.LocalEndPoint, eventStreamId);
                     var corrid = Guid.NewGuid();
-                    var deleteDto = new TcpClientMessageDto.DeleteStream(eventStreamId, expectedVersion, false);
+                    var deleteDto = new TcpClientMessageDto.DeleteStream(eventStreamId, expectedVersion, false, true);
                     var package = new TcpPackage(TcpCommand.DeleteStream, corrid, deleteDto.Serialize()).AsByteArray();
                     sw.Start();
                     conn.EnqueueSend(package);
@@ -80,7 +80,7 @@ namespace EventStore.TestClient.Commands
                     if (dto.Result == TcpClientMessageDto.OperationResult.Success)
                     {
                         context.Log.Info("DELETED event stream {0}.", eventStreamId);
-                        PerfUtils.LogTeamCityGraphData(string.Format("{0}-latency-ms", Keyword), (int)sw.ElapsedMilliseconds);
+                        PerfUtils.LogTeamCityGraphData(string.Format("{0}-latency-ms", Keyword), (int)Math.Round(sw.Elapsed.TotalMilliseconds));
                         context.Success();
                     }
                     else

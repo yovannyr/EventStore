@@ -49,6 +49,7 @@ namespace EventStore.ClientAPI.Transport.Tcp
                                                                   Guid connectionId, 
                                                                   IPEndPoint remoteEndPoint,
                                                                   TcpClientConnector connector,
+                                                                  TimeSpan connectionTimeout,
                                                                   Action<ITcpConnection> onConnectionEstablished,
                                                                   Action<ITcpConnection, SocketError> onConnectionFailed,
                                                                   Action<ITcpConnection, SocketError> onConnectionClosed)
@@ -66,7 +67,7 @@ namespace EventStore.ClientAPI.Transport.Tcp
                                   {
                                       if (onConnectionFailed != null)
                                           onConnectionFailed(connection, socketError);
-                                  }, connection);
+                                  }, connection, connectionTimeout);
 // ReSharper restore ImplicitlyCapturedClosure
             return connection;
         }
@@ -296,8 +297,7 @@ namespace EventStore.ClientAPI.Transport.Tcp
                 res = new List<ArraySegment<byte>>(_receiveQueue.Count);
                 while (_receiveQueue.Count > 0)
                 {
-                    var arraySegments = _receiveQueue.Dequeue();
-                    res.Add(arraySegments);
+                    res.Add(_receiveQueue.Dequeue());
                 }
 
                 callback = _receiveCallback;
@@ -311,7 +311,7 @@ namespace EventStore.ClientAPI.Transport.Tcp
             {
                 bytes += res[i].Count;
             }
-                NotifyReceiveDispatched(bytes);
+            NotifyReceiveDispatched(bytes);
         }
 
         public void Close(string reason)
@@ -328,13 +328,13 @@ namespace EventStore.ClientAPI.Transport.Tcp
 
             NotifyClosed();
 
-            _log.Info("[{0:HH:mm:ss.fff}: N{1}, L{2}, {3:B}]:\nReceived bytes: {4}, Sent bytes: {5}\n"
+            _log.Info("ClientAPI {12} closed [{0:HH:mm:ss.fff}: N{1}, L{2}, {3:B}]:\nReceived bytes: {4}, Sent bytes: {5}\n"
                       + "Send calls: {6}, callbacks: {7}\nReceive calls: {8}, callbacks: {9}\nClose reason: [{10}] {11}\n",
                       DateTime.UtcNow, RemoteEndPoint, LocalEndPoint, _connectionId,
                       TotalBytesReceived, TotalBytesSent,
                       SendCalls, SendCallbacks,
                       ReceiveCalls, ReceiveCallbacks,
-                      socketError, reason);
+                      socketError, reason, GetType().Name);
 
             if (_socket != null)
             {

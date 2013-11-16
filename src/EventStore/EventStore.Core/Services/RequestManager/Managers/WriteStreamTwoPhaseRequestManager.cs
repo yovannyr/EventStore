@@ -50,7 +50,8 @@ namespace EventStore.Core.Services.RequestManager.Managers
         public void Handle(ClientMessage.WriteEvents request)
         {
             _request = request;
-            Init(request.Envelope, request.InternalCorrId, request.CorrelationId, request.EventStreamId, request.User, null, StreamAccessType.Write);
+            InitNoPreparePhase(request.Envelope, request.InternalCorrId, request.CorrelationId,
+                               request.EventStreamId, request.User, StreamAccessType.Write);
         }
 
         protected override void OnSecurityAccessGranted(Guid internalCorrId)
@@ -62,10 +63,10 @@ namespace EventStore.Core.Services.RequestManager.Managers
             _request = null;
         }
 
-        protected override void CompleteSuccessRequest(int firstEventNumber)
+        protected override void CompleteSuccessRequest(int firstEventNumber, int lastEventNumber)
         {
-            base.CompleteSuccessRequest(firstEventNumber);
-            ResponseEnvelope.ReplyWith(new ClientMessage.WriteEventsCompleted(ClientCorrId, firstEventNumber));
+            base.CompleteSuccessRequest(firstEventNumber, lastEventNumber);
+            ResponseEnvelope.ReplyWith(new ClientMessage.WriteEventsCompleted(ClientCorrId, firstEventNumber, lastEventNumber));
         }
 
         protected override void CompleteFailedRequest(OperationResult result, string error)

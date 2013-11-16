@@ -28,7 +28,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
@@ -51,6 +50,7 @@ namespace EventStore.Transport.Tcp
                                                                 string targetHost,
                                                                 bool validateServer,
                                                                 TcpClientConnector connector, 
+                                                                TimeSpan connectionTimeout,
                                                                 Action<ITcpConnection> onConnectionEstablished, 
                                                                 Action<ITcpConnection, SocketError> onConnectionFailed,
                                                                 bool verbose)
@@ -68,7 +68,7 @@ namespace EventStore.Transport.Tcp
                                   {
                                       if (onConnectionFailed != null)
                                           onConnectionFailed(connection, socketError);
-                                  });
+                                  }, connection, connectionTimeout);
             // ReSharper restore ImplicitlyCapturedClosure
             return connection;
         }
@@ -105,7 +105,7 @@ namespace EventStore.Transport.Tcp
         private readonly bool _verbose;
 
         private readonly Common.Concurrent.ConcurrentQueue<ArraySegment<byte>> _sendQueue = new Common.Concurrent.ConcurrentQueue<ArraySegment<byte>>();
-        private readonly Common.Concurrent.ConcurrentQueue<Tuple<ArraySegment<byte>, int>> _receiveQueue = new Common.Concurrent.ConcurrentQueue<Tuple<ArraySegment<byte>, int>>();
+        private readonly Common.Concurrent.ConcurrentQueue<ReceivedData> _receiveQueue = new Common.Concurrent.ConcurrentQueue<ReceivedData>();
         private readonly MemoryStream _memoryStream = new MemoryStream();
 
         private readonly SpinLock2 _streamLock = new SpinLock2();
@@ -484,7 +484,8 @@ namespace EventStore.Transport.Tcp
             if (buffer.Array == null || buffer.Count == 0 || buffer.Array.Length < buffer.Offset + buffer.Count)
                 throw new Exception("Invalid buffer allocated.");
             Buffer.BlockCopy(_receiveBuffer, 0, buffer.Array, buffer.Offset, bytesRead);
-            _receiveQueue.Enqueue(Tuple.Create(new ArraySegment<byte>(buffer.Array, buffer.Offset, bytesRead), buffer.Count));
+            var buf = new ArraySegment<byte>(buffer.Array, buffer.Offset, buffer.Count);
+            _receiveQueue.Enqueue(new ReceivedData(buf, bytesRead));
 
             StartReceive();
             TryDequeueReceivedData();
@@ -505,21 +506,26 @@ namespace EventStore.Transport.Tcp
                         throw new Exception("Some threading issue in TryDequeueReceivedData! Callback is null!");
                     }
 
-                    var dequeueResultList = new List<Tuple<ArraySegment<byte>, int>>(_receiveQueue.Count);
-                    Tuple<ArraySegment<byte>, int> piece;
+                    var res = new List<ReceivedData>(_receiveQueue.Count);
+                    ReceivedData piece;
                     while (_receiveQueue.TryDequeue(out piece))
                     {
-                        dequeueResultList.Add(piece);
+                        res.Add(piece);
                     }
 
-                    callback(this, dequeueResultList.Select(v => v.Item1).ToArray());
-
+                    var data = new ArraySegment<byte>[res.Count];
                     int bytes = 0;
-                    for (int i = 0, n = dequeueResultList.Count; i < n; ++i)
+                    for (int i = 0; i < data.Length; ++i)
                     {
-                        var tuple = dequeueResultList[i];
-                        bytes += tuple.Item1.Count;
-                        TcpConnection.BufferManager.CheckIn(new ArraySegment<byte>(tuple.Item1.Array, tuple.Item1.Offset, tuple.Item2)); // dispose buffers
+                        var d = res[i];
+                        bytes += d.DataLen;
+                        data[i] = new ArraySegment<byte>(d.Buf.Array, d.Buf.Offset, d.DataLen);
+                    }
+                    callback(this, data);
+
+                    for (int i = 0, n = res.Count; i < n; ++i)
+                    {
+                        TcpConnection.BufferManager.CheckIn(res[i].Buf); // dispose buffers
                     }
                     NotifyReceiveDispatched(bytes);
                 }
@@ -543,13 +549,13 @@ namespace EventStore.Transport.Tcp
 
             if (_verbose)
             {
-                Log.Info("[{0:HH:mm:ss.fff}: S{1}, L{2}, {3:B}]:\nReceived bytes: {4}, Sent bytes: {5}\n"
+                Log.Info("ES {12} closed [{0:HH:mm:ss.fff}: S{1}, L{2}, {3:B}]:\nReceived bytes: {4}, Sent bytes: {5}\n"
                          + "Send calls: {6}, callbacks: {7}\nReceive calls: {8}, callbacks: {9}\nClose reason: [{10}] {11}\n",
                          DateTime.UtcNow, RemoteEndPoint, LocalEndPoint, _connectionId,
                          TotalBytesReceived, TotalBytesSent,
                          SendCalls, SendCallbacks,
                          ReceiveCalls, ReceiveCallbacks,
-                         socketError, reason);
+                         socketError, reason, GetType().Name);
             }
 
             if (_sslStream != null)
@@ -563,6 +569,18 @@ namespace EventStore.Transport.Tcp
         public override string ToString()
         {
             return "S" + RemoteEndPoint;
+        }
+
+        private struct ReceivedData
+        {
+            public readonly ArraySegment<byte> Buf;
+            public readonly int DataLen;
+
+            public ReceivedData(ArraySegment<byte> buf, int dataLen)
+            {
+                Buf = buf;
+                DataLen = dataLen;
+            }
         }
     }
 }

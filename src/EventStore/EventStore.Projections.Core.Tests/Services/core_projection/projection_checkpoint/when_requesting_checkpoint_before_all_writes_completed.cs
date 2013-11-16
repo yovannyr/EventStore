@@ -53,31 +53,35 @@ namespace EventStore.Projections.Core.Tests.Services.core_projection.projection_
         {
             _readyHandler = new TestCheckpointManagerMessageHandler();
             _checkpoint = new ProjectionCheckpoint(
-                _readDispatcher, _writeDispatcher, new ProjectionVersion(1, 0, 0), null, _readyHandler,
-                CheckpointTag.FromPosition(100, 50), new TransactionFilePositionTagger(),
-                CheckpointTag.FromPosition(0, -1), 250);
+                _ioDispatcher, new ProjectionVersion(1, 0, 0), null, _readyHandler,
+                CheckpointTag.FromPosition(0, 100, 50), new TransactionFilePositionTagger(0),
+                CheckpointTag.FromPosition(0, 0, -1), 250);
             _checkpoint.Start();
             _checkpoint.ValidateOrderAndEmitEvents(
                 new[]
-                    {
+                {
+                    new EmittedEventEnvelope(
                         new EmittedDataEvent(
-                    "stream2", Guid.NewGuid(), "type", "data2", null, CheckpointTag.FromPosition(120, 110), null),
+                            "stream2", Guid.NewGuid(), "type", true, "data2", null, CheckpointTag.FromPosition(0, 120, 110), null)),
+                    new EmittedEventEnvelope(
                         new EmittedDataEvent(
-                    "stream2", Guid.NewGuid(), "type", "data4", null, CheckpointTag.FromPosition(120, 110), null),
-                    });
+                            "stream2", Guid.NewGuid(), "type", true, "data4", null, CheckpointTag.FromPosition(0, 120, 110), null)),
+                });
             _checkpoint.ValidateOrderAndEmitEvents(
                 new[]
-                    {
+                {
+                    new EmittedEventEnvelope(
                         new EmittedDataEvent(
-                    "stream1", Guid.NewGuid(), "type", "data", null, CheckpointTag.FromPosition(140, 130), null)
-                    });
+                            "stream1", Guid.NewGuid(), "type", true, "data", null, CheckpointTag.FromPosition(0, 140, 130), null))
+                });
             _checkpoint.ValidateOrderAndEmitEvents(
                 new[]
-                    {
+                {
+                    new EmittedEventEnvelope(
                         new EmittedDataEvent(
-                    "stream1", Guid.NewGuid(), "type", "data", null, CheckpointTag.FromPosition(160, 150), null)
-                    });
-            _checkpoint.Prepare(CheckpointTag.FromPosition(200, 150));
+                            "stream1", Guid.NewGuid(), "type", true, "data", null, CheckpointTag.FromPosition(0, 160, 150), null))
+                });
+            _checkpoint.Prepare(CheckpointTag.FromPosition(0, 200, 150));
         }
 
         [Test]
@@ -90,10 +94,10 @@ namespace EventStore.Projections.Core.Tests.Services.core_projection.projection_
         public void ready_for_checkpoint_after_all_writes_complete()
         {
             var writes = _consumer.HandledMessages.OfType<ClientMessage.WriteEvents>().ToArray();
-            writes[0].Envelope.ReplyWith(new ClientMessage.WriteEventsCompleted(writes[0].CorrelationId, 0));
-            writes[1].Envelope.ReplyWith(new ClientMessage.WriteEventsCompleted(writes[1].CorrelationId, 0));
+            writes[0].Envelope.ReplyWith(new ClientMessage.WriteEventsCompleted(writes[0].CorrelationId, 0, 0));
+            writes[1].Envelope.ReplyWith(new ClientMessage.WriteEventsCompleted(writes[1].CorrelationId, 0, 0));
             writes = _consumer.HandledMessages.OfType<ClientMessage.WriteEvents>().ToArray();
-            writes[2].Envelope.ReplyWith(new ClientMessage.WriteEventsCompleted(writes[2].CorrelationId, 0));
+            writes[2].Envelope.ReplyWith(new ClientMessage.WriteEventsCompleted(writes[2].CorrelationId, 0, 0));
 
             Assert.AreEqual(1, _readyHandler.HandledMessages.OfType<CoreProjectionProcessingMessage.ReadyForCheckpoint>().Count());
         }

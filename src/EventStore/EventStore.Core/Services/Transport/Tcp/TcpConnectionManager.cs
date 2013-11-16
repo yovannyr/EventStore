@@ -24,7 +24,7 @@
 // THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-// 
+
 using System;
 using System.Collections.Generic;
 using System.Net;
@@ -33,11 +33,11 @@ using System.Security.Principal;
 using System.Threading;
 using EventStore.Common.Log;
 using EventStore.Common.Utils;
+using EventStore.Core.Authentication;
 using EventStore.Core.Bus;
 using EventStore.Core.Messages;
 using EventStore.Core.Messaging;
 using EventStore.Core.Services.TimerService;
-using EventStore.Core.Services.Transport.Http.Authentication;
 using EventStore.Transport.Tcp;
 using EventStore.Transport.Tcp.Framing;
 
@@ -50,6 +50,7 @@ namespace EventStore.Core.Services.Transport.Tcp
     public class TcpConnectionManager: IHandle<TcpMessage.Heartbeat>, IHandle<TcpMessage.HeartbeatTimeout>
     {
         public const int ConnectionQueueSizeThreshold = 50000;
+        public static readonly TimeSpan ConnectionTimeout = TimeSpan.FromMilliseconds(1000);
 
         private static readonly ILogger Log = LogManager.GetLoggerFor<TcpConnectionManager>();
 
@@ -75,7 +76,7 @@ namespace EventStore.Core.Services.Transport.Tcp
         private readonly TimeSpan _heartbeatInterval;
         private readonly TimeSpan _heartbeatTimeout;
 
-        private readonly InternalAuthenticationProvider _authProvider;
+        private readonly IAuthenticationProvider _authProvider;
         private UserCredentials _defaultUser;
 
         public TcpConnectionManager(string connectionName, 
@@ -83,7 +84,7 @@ namespace EventStore.Core.Services.Transport.Tcp
                                     IPublisher publisher, 
                                     ITcpConnection openedConnection,
                                     IPublisher networkSendQueue,
-                                    InternalAuthenticationProvider authProvider,
+                                    IAuthenticationProvider authProvider,
                                     TimeSpan heartbeatInterval,
                                     TimeSpan heartbeatTimeout,
                                     Action<TcpConnectionManager, SocketError> onConnectionClosed)
@@ -133,7 +134,7 @@ namespace EventStore.Core.Services.Transport.Tcp
                                     string sslTargetHost,
                                     bool sslValidateServer,
                                     IPublisher networkSendQueue,
-                                    InternalAuthenticationProvider authProvider,
+                                    IAuthenticationProvider authProvider,
                                     TimeSpan heartbeatInterval,
                                     TimeSpan heartbeatTimeout,
                                     Action<TcpConnectionManager> onConnectionEstablished,
@@ -167,8 +168,9 @@ namespace EventStore.Core.Services.Transport.Tcp
 
             RemoteEndPoint = remoteEndPoint;
             _connection = useSsl 
-                ? connector.ConnectSslTo(ConnectionId, remoteEndPoint, sslTargetHost, sslValidateServer, OnConnectionEstablished, OnConnectionFailed)
-                : connector.ConnectTo(ConnectionId, remoteEndPoint, OnConnectionEstablished, OnConnectionFailed);
+                ? connector.ConnectSslTo(ConnectionId, remoteEndPoint, ConnectionTimeout,
+                                         sslTargetHost, sslValidateServer, OnConnectionEstablished, OnConnectionFailed)
+                : connector.ConnectTo(ConnectionId, remoteEndPoint, ConnectionTimeout, OnConnectionEstablished, OnConnectionFailed);
             _connection.ConnectionClosed += OnConnectionClosed;
             if (_connection.IsClosed)
                 OnConnectionClosed(_connection, SocketError.Success);
@@ -421,7 +423,7 @@ namespace EventStore.Core.Services.Transport.Tcp
             }
         }
 
-        private class TcpAuthRequest: InternalAuthenticationProvider.AuthenticationRequest
+        private class TcpAuthRequest : AuthenticationRequest
         {
             private readonly TcpConnectionManager _manager;
             private readonly TcpPackage _package;
@@ -449,7 +451,7 @@ namespace EventStore.Core.Services.Transport.Tcp
             }
         }
 
-        private class TcpDefaultAuthRequest : InternalAuthenticationProvider.AuthenticationRequest
+        private class TcpDefaultAuthRequest : AuthenticationRequest
         {
             private readonly TcpConnectionManager _manager;
             private readonly Guid _correlationId;

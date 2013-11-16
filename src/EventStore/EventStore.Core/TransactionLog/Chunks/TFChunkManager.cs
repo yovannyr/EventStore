@@ -127,7 +127,7 @@ namespace EventStore.Core.TransactionLog.Chunks
         public TFChunk.TFChunk CreateTempChunk(ChunkHeader chunkHeader, int fileSize)
         {
             var chunkFileName = _config.FileNamingStrategy.GetTempFilename();
-            return TFChunk.TFChunk.CreateWithHeader(chunkFileName, chunkHeader, fileSize);
+            return TFChunk.TFChunk.CreateWithHeader(chunkFileName, chunkHeader, fileSize, _config.InMemDb);
         }
 
         public TFChunk.TFChunk AddNewChunk()
@@ -136,7 +136,7 @@ namespace EventStore.Core.TransactionLog.Chunks
             {
                 var chunkNumber = _chunksCount;
                 var chunkName = _config.FileNamingStrategy.GetFilenameFor(chunkNumber, 0);
-                var chunk = TFChunk.TFChunk.CreateNew(chunkName, _config.ChunkSize, chunkNumber, chunkNumber, isScavenged: false);
+                var chunk = TFChunk.TFChunk.CreateNew(chunkName, _config.ChunkSize, chunkNumber, chunkNumber, isScavenged: false, inMem: _config.InMemDb);
                 AddChunk(chunk);
                 return chunk;
             }
@@ -154,7 +154,7 @@ namespace EventStore.Core.TransactionLog.Chunks
                                                       chunkHeader.ChunkStartNumber, chunkHeader.ChunkEndNumber, _chunksCount));
 
                 var chunkName = _config.FileNamingStrategy.GetFilenameFor(chunkHeader.ChunkStartNumber, 0);
-                var chunk = TFChunk.TFChunk.CreateWithHeader(chunkName, chunkHeader, fileSize);
+                var chunk = TFChunk.TFChunk.CreateWithHeader(chunkName, chunkHeader, fileSize, _config.InMemDb);
                 AddChunk(chunk);
                 return chunk;
             }
@@ -185,32 +185,34 @@ namespace EventStore.Core.TransactionLog.Chunks
             var chunkHeader = chunk.ChunkHeader;
             var oldFileName = chunk.FileName;
 
-            Log.Info("Switching chunk #{0}-{1} ({2})...", chunkHeader.ChunkStartNumber, chunkHeader.ChunkEndNumber, oldFileName);
+            Log.Info("Switching chunk #{0}-{1} ({2})...", chunkHeader.ChunkStartNumber, chunkHeader.ChunkEndNumber, Path.GetFileName(oldFileName));
+            TFChunk.TFChunk newChunk;
 
-            chunk.Dispose();
-            try
+            if (_config.InMemDb)
+                newChunk = chunk;
+            else
             {
-                chunk.WaitForDestroy(0); // should happen immediately
+                chunk.Dispose();
+                try
+                {
+                    chunk.WaitForDestroy(0); // should happen immediately
+                }
+                catch (TimeoutException exc)
+                {
+                    throw new Exception(
+                            string.Format("The chunk that is being switched {0} is used by someone else.", chunk), exc);
+                }
+                var newFileName = _config.FileNamingStrategy.DetermineBestVersionFilenameFor(chunkHeader.ChunkStartNumber);
+                Log.Info("File {0} will be moved to file {1}", Path.GetFileName(oldFileName), Path.GetFileName(newFileName));
+                File.Move(oldFileName, newFileName);
+                newChunk = TFChunk.TFChunk.FromCompletedFile(newFileName, verifyHash);
             }
-            catch (TimeoutException exc)
-            {
-                throw new Exception(string.Format("The chunk that is being switched #{0}-{1} ({2}) is used by someone else.",
-                                                  chunkHeader.ChunkStartNumber, chunkHeader.ChunkEndNumber, oldFileName), exc);
-            }
-
-            var newFileName = _config.FileNamingStrategy.DetermineBestVersionFilenameFor(chunkHeader.ChunkStartNumber);
-            
-            Log.Info("File {0} will be moved to file {1}", oldFileName, newFileName);
-            
-            File.Move(oldFileName, newFileName);
-            var newChunk = TFChunk.TFChunk.FromCompletedFile(newFileName, verifyHash);
 
             lock (_chunksLocker)
             {
                 if (!ReplaceChunksWith(newChunk, "Old"))
                 {
-                    Log.Info("Chunk #{0}-{1} ({2}) will be not switched, marking for remove...",
-                             chunkHeader.ChunkStartNumber, chunkHeader.ChunkEndNumber,newFileName);
+                    Log.Info("Chunk {0} will be not switched, marking for remove...", newChunk);
                     newChunk.MarkForDeletion();
                 }
 
@@ -248,8 +250,7 @@ namespace EventStore.Core.TransactionLog.Chunks
                 {
                     oldChunk.MarkForDeletion();
 
-                    Log.Info("{0} chunk #{1}-{2} ({3}) is marked for deletion.", chunkExplanation,
-                                oldChunk.ChunkHeader.ChunkStartNumber, oldChunk.ChunkHeader.ChunkEndNumber, oldChunk.FileName);
+                    Log.Info("{0} chunk #{1} is marked for deletion.", chunkExplanation, oldChunk);
                 }
                 lastRemovedChunk = oldChunk;
             }
@@ -265,8 +266,7 @@ namespace EventStore.Core.TransactionLog.Chunks
                 if (oldChunk != null && !ReferenceEquals(lastRemovedChunk, oldChunk))
                 {
                     oldChunk.MarkForDeletion();
-                    Log.Info("{0} chunk #{1}-{2} ({3}) is marked for deletion.", chunkExplanation,
-                             oldChunk.ChunkHeader.ChunkStartNumber, oldChunk.ChunkHeader.ChunkEndNumber, oldChunk.FileName);
+                    Log.Info("{0} chunk {1} is marked for deletion.", chunkExplanation, oldChunk);
                 }
                 lastRemovedChunk = oldChunk;
             }

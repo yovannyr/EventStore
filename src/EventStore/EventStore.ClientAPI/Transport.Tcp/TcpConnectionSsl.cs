@@ -29,7 +29,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
@@ -50,6 +49,7 @@ namespace EventStore.ClientAPI.Transport.Tcp
                                                                 string targetHost,
                                                                 bool validateServer,
                                                                 TcpClientConnector connector, 
+                                                                TimeSpan connectionTimeout,
                                                                 Action<ITcpConnection> onConnectionEstablished, 
                                                                 Action<ITcpConnection, SocketError> onConnectionFailed,
                                                                 Action<ITcpConnection, SocketError> onConnectionClosed)
@@ -67,7 +67,7 @@ namespace EventStore.ClientAPI.Transport.Tcp
                                   {
                                       if (onConnectionFailed != null)
                                           onConnectionFailed(connection, socketError);
-                                  }, connection);
+                                  }, connection, connectionTimeout);
             // ReSharper restore ImplicitlyCapturedClosure
             return connection;
         }
@@ -79,7 +79,7 @@ namespace EventStore.ClientAPI.Transport.Tcp
         private readonly ILogger _log;
 
         private readonly Common.Concurrent.ConcurrentQueue<ArraySegment<byte>> _sendQueue = new Common.Concurrent.ConcurrentQueue<ArraySegment<byte>>();
-        private readonly Common.Concurrent.ConcurrentQueue<Tuple<ArraySegment<byte>, int>> _receiveQueue = new Common.Concurrent.ConcurrentQueue<Tuple<ArraySegment<byte>, int>>();
+        private readonly Common.Concurrent.ConcurrentQueue<ArraySegment<byte>> _receiveQueue = new Common.Concurrent.ConcurrentQueue<ArraySegment<byte>>();
         private readonly MemoryStream _memoryStream = new MemoryStream();
 
         private readonly SpinLock2 _streamLock = new SpinLock2();
@@ -387,7 +387,7 @@ namespace EventStore.ClientAPI.Transport.Tcp
 
             var buffer = new ArraySegment<byte>(new byte[bytesRead]);
             Buffer.BlockCopy(_receiveBuffer, 0, buffer.Array, buffer.Offset, bytesRead);
-            _receiveQueue.Enqueue(Tuple.Create(buffer, bytesRead));
+            _receiveQueue.Enqueue(buffer);
 
             StartReceive();
             TryDequeueReceivedData();
@@ -408,19 +408,19 @@ namespace EventStore.ClientAPI.Transport.Tcp
                         throw new Exception("Some threading issue in TryDequeueReceivedData! Callback is null!");
                     }
 
-                    var dequeueResultList = new List<Tuple<ArraySegment<byte>, int>>(_receiveQueue.Count);
-                    Tuple<ArraySegment<byte>, int> piece;
+                    var res = new List<ArraySegment<byte>>(_receiveQueue.Count);
+                    ArraySegment<byte> piece;
                     while (_receiveQueue.TryDequeue(out piece))
                     {
-                        dequeueResultList.Add(piece);
+                        res.Add(piece);
                     }
 
-                    callback(this, dequeueResultList.Select(v => new ArraySegment<byte>(v.Item1.Array, v.Item1.Offset, v.Item2)));
+                    callback(this, res);
 
                     int bytes = 0;
-                    for (int i = 0, n = dequeueResultList.Count; i < n; ++i)
+                    for (int i = 0, n = res.Count; i < n; ++i)
                     {
-                        bytes += dequeueResultList[i].Item2;
+                        bytes += res[i].Count;
                     }
                     NotifyReceiveDispatched(bytes);
                 }
@@ -442,13 +442,13 @@ namespace EventStore.ClientAPI.Transport.Tcp
 
             NotifyClosed();
 
-            _log.Info("[{0:HH:mm:ss.fff}: S{1}, L{2}, {3:B}]:\nReceived bytes: {4}, Sent bytes: {5}\n"
+            _log.Info("ClientAPI {12} closed [{0:HH:mm:ss.fff}: S{1}, L{2}, {3:B}]:\nReceived bytes: {4}, Sent bytes: {5}\n"
                       + "Send calls: {6}, callbacks: {7}\nReceive calls: {8}, callbacks: {9}\nClose reason: [{10}] {11}\n",
                       DateTime.UtcNow, RemoteEndPoint, LocalEndPoint, _connectionId,
                       TotalBytesReceived, TotalBytesSent,
                       SendCalls, SendCallbacks,
                       ReceiveCalls, ReceiveCallbacks,
-                      socketError, reason);
+                      socketError, reason, GetType().Name);
 
             if (_sslStream != null)
                 Helper.EatException(() => _sslStream.Close());

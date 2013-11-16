@@ -36,7 +36,9 @@ namespace EventStore.Core.Services.RequestManager.Managers
     public class DeleteStreamTwoPhaseRequestManager : TwoPhaseRequestManagerBase, 
                                                       IHandle<ClientMessage.DeleteStream>
     {
-        private ClientMessage.DeleteStream _request;
+        private string _eventStreamId;
+        private int _expectedVersion;
+        private bool _hardDelete;
 
         public DeleteStreamTwoPhaseRequestManager(IPublisher publisher,  
                                                   int prepareCount, 
@@ -49,23 +51,24 @@ namespace EventStore.Core.Services.RequestManager.Managers
 
         public void Handle(ClientMessage.DeleteStream request)
         {
-            _request = request;
-            Init(request.Envelope, request.InternalCorrId, request.CorrelationId, request.EventStreamId,
-                 request.User, null, StreamAccessType.Delete);
+            _eventStreamId = request.EventStreamId;
+            _expectedVersion = request.ExpectedVersion;
+            _hardDelete = request.HardDelete;
+            InitNoPreparePhase(request.Envelope, request.InternalCorrId, request.CorrelationId, request.EventStreamId,
+                               request.User, StreamAccessType.Delete);
         }
 
         protected override void OnSecurityAccessGranted(Guid internalCorrId)
         {
             Publisher.Publish(
                 new StorageMessage.WriteDelete(
-                    internalCorrId, PublishEnvelope, _request.EventStreamId, _request.ExpectedVersion,
+                    internalCorrId, PublishEnvelope, _eventStreamId, _expectedVersion, _hardDelete,
                     liveUntil: NextTimeoutTime - TimeoutOffset));
-            _request = null;
         }
 
-        protected override void CompleteSuccessRequest(int firstEventNumber)
+        protected override void CompleteSuccessRequest(int firstEventNumber, int lastEventNumber)
         {
-            base.CompleteSuccessRequest(firstEventNumber);
+            base.CompleteSuccessRequest(firstEventNumber, lastEventNumber);
             var responseMsg = new ClientMessage.DeleteStreamCompleted(ClientCorrId, OperationResult.Success, null);
             ResponseEnvelope.ReplyWith(responseMsg);
         }

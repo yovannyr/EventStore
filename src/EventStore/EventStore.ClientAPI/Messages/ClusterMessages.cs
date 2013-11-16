@@ -29,7 +29,7 @@ using System;
 
 namespace EventStore.ClientAPI.Messages
 {
-    public class ClusterMessages
+    internal class ClusterMessages
     {
         public class ClusterInfoDto
         {
@@ -74,6 +74,8 @@ namespace EventStore.ClientAPI.Messages
             public long EpochPosition { get; set; }
             public int EpochNumber { get; set; }
             public Guid EpochId { get; set; }
+
+            public int NodePriority { get; set; }
 
             public override string ToString()
             {

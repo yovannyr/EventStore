@@ -33,15 +33,26 @@ Properties {
 
 # Fallback platform/configuration (should be overriden by invoke-psake)
 Properties {
-    $platform = "Any CPU"
-    $configuration = "Release"
+    if ($platform -eq $null) {
+        $platform = "Any CPU" #
+    }
+
+    if ($configuration -eq $null) {
+        $configuration = "Release"
+    }
+    
+    if ($defines -eq $null) {
+        $definesCommandLine = ""
+    } else {
+        $definesCommandLine = "/p:AppendedDefineConstants=$defines"
+    }
 }
 
 Task Build-EventStore {
     try {
         Invoke-Task Patch-AssemblyInfos
         #TODO: put back in /p:OutDir=$outputDirectory
-        Exec { msbuild $eventStoreSolution /p:Configuration=$configuration /p:Platform=$platform }
+        Exec { msbuild $eventStoreSolution /p:Configuration=$configuration /p:Platform=$platform $definesCommandLine }
     } finally {
         Invoke-Task Revert-AssemblyInfos
     }

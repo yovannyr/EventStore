@@ -36,6 +36,7 @@ using EventStore.Core.Messaging;
 using EventStore.Core.Services.TimerService;
 using EventStore.Core.Services.Transport.Http.Authentication;
 using EventStore.Core.Services.Transport.Http.Messages;
+using EventStore.Core.Settings;
 using EventStore.Transport.Http.EntityManagement;
 using EventStore.Transport.Http.Server;
 
@@ -78,16 +79,17 @@ namespace EventStore.Core.Services.Transport.Http
             _server.RequestReceived += RequestReceived;
         }
 
-        public static void CreateAndSubscribePipeline(IBus bus, AuthenticationProvider[] authenticationProviders)
+        public static void CreateAndSubscribePipeline(IBus bus, HttpAuthenticationProvider[] httpAuthenticationProviders)
         {
-            Ensure.NotNull(authenticationProviders, "authenticationProviders");
+            Ensure.NotNull(bus, "bus");
+            Ensure.NotNull(httpAuthenticationProviders, "httpAuthenticationProviders");
+
+            // ReSharper disable RedundantTypeArgumentsOfMethod
+            var requestAuthenticationManager = new IncomingHttpRequestAuthenticationManager(httpAuthenticationProviders);
+            bus.Subscribe<IncomingHttpRequestMessage>(requestAuthenticationManager);
+            // ReSharper restore RedundantTypeArgumentsOfMethod
 
             var requestProcessor = new AuthenticatedHttpRequestProcessor();
-            var requestAuthenticationManager = new IncomingHttpRequestAuthenticationManager(authenticationProviders);
-
-// ReSharper disable RedundantTypeArgumentsOfMethod
-            bus.Subscribe<IncomingHttpRequestMessage>(requestAuthenticationManager);
-// ReSharper restore RedundantTypeArgumentsOfMethod
             bus.Subscribe<AuthenticatedHttpRequestMessage>(requestProcessor);
             bus.Subscribe<HttpMessage.PurgeTimedOutRequests>(requestProcessor);
         }
@@ -146,12 +148,24 @@ namespace EventStore.Core.Services.Transport.Http
             controller.Subscribe(this);
         }
 
-        public void RegisterControllerAction(ControllerAction action, Action<HttpEntityManager, UriTemplateMatch> handler)
+        public void RegisterCustomAction(ControllerAction action, Func<HttpEntityManager, UriTemplateMatch, RequestParams> handler)
         {
             Ensure.NotNull(action, "action");
             Ensure.NotNull(handler, "handler");
 
-            _uriRouter.RegisterControllerAction(action, handler);
+            _uriRouter.RegisterAction(action, handler);
+        }
+
+        public void RegisterAction(ControllerAction action, Action<HttpEntityManager, UriTemplateMatch> handler)
+        {
+            Ensure.NotNull(action, "action");
+            Ensure.NotNull(handler, "handler");
+
+            _uriRouter.RegisterAction(action, (man, match) =>
+            {
+                handler(man, match);
+                return new RequestParams(ESConsts.HttpTimeout);
+            });
         }
 
         public List<UriToActionMatch> GetAllUriMatches(Uri uri)

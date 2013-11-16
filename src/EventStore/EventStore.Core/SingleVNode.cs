@@ -24,13 +24,13 @@
 // THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-// 
 
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using EventStore.Common.Log;
+using EventStore.Core.Authentication;
 using EventStore.Core.Bus;
 using EventStore.Core.DataStructures;
 using EventStore.Core.Helpers;
@@ -53,6 +53,7 @@ using EventStore.Core.Services.UserManagement;
 using EventStore.Core.Services.VNode;
 using EventStore.Common.Utils;
 using EventStore.Core.Settings;
+using EventStore.Core.TransactionLog;
 using EventStore.Core.TransactionLog.Chunks;
 
 namespace EventStore.Core
@@ -103,7 +104,7 @@ namespace EventStore.Core
             // MONITORING
             var monitoringInnerBus = new InMemoryBus("MonitoringInnerBus", watchSlowMsg: false);
             var monitoringRequestBus = new InMemoryBus("MonitoringRequestBus", watchSlowMsg: false);
-            var monitoringQueue = new QueuedHandler(monitoringInnerBus, "MonitoringQueue", true, TimeSpan.FromMilliseconds(100));
+            var monitoringQueue = new QueuedHandlerThreadPool(monitoringInnerBus, "MonitoringQueue", true, TimeSpan.FromMilliseconds(100));
             var monitoring = new MonitoringService(monitoringQueue,
                                                    monitoringRequestBus,
                                                    _mainQueue,
@@ -115,10 +116,12 @@ namespace EventStore.Core
             _mainBus.Subscribe(monitoringQueue.WidenFrom<SystemMessage.SystemInit, Message>());
             _mainBus.Subscribe(monitoringQueue.WidenFrom<SystemMessage.StateChangeMessage, Message>());
             _mainBus.Subscribe(monitoringQueue.WidenFrom<SystemMessage.BecomeShuttingDown, Message>());
+            _mainBus.Subscribe(monitoringQueue.WidenFrom<SystemMessage.BecomeShutdown, Message>());
             _mainBus.Subscribe(monitoringQueue.WidenFrom<ClientMessage.WriteEventsCompleted, Message>());
             monitoringInnerBus.Subscribe<SystemMessage.SystemInit>(monitoring);
             monitoringInnerBus.Subscribe<SystemMessage.StateChangeMessage>(monitoring);
             monitoringInnerBus.Subscribe<SystemMessage.BecomeShuttingDown>(monitoring);
+            monitoringInnerBus.Subscribe<SystemMessage.BecomeShutdown>(monitoring);
             monitoringInnerBus.Subscribe<ClientMessage.WriteEventsCompleted>(monitoring);
             monitoringInnerBus.Subscribe<MonitoringMessage.GetFreshStats>(monitoring);
 
@@ -135,18 +138,21 @@ namespace EventStore.Core
 
             // STORAGE SUBSYSTEM
             var indexPath = Path.Combine(db.Config.Path, "index");
+            var readerPool = new ObjectPool<ITransactionFileReader>(
+                "ReadIndex readers pool", ESConsts.PTableInitialReaderCount, ESConsts.PTableMaxReaderCount,
+                () => new TFChunkReader(db, db.Config.WriterCheckpoint));
             var tableIndex = new TableIndex(indexPath,
                                             () => new HashListMemTable(maxSize: memTableEntryCount * 2),
+                                            () => new TFReaderLease(readerPool),
                                             maxSizeForMemory: memTableEntryCount,
-                                            maxTablesPerLevel: 2);
-
+                                            maxTablesPerLevel: 2,
+                                            inMem: db.Config.InMemDb);
+            var hasher = new XXHashUnsafe();
             var readIndex = new ReadIndex(_mainQueue,
-                                          ESConsts.PTableInitialReaderCount,
-                                          ESConsts.PTableMaxReaderCount,
-                                          () => new TFChunkReader(db, db.Config.WriterCheckpoint),
+                                          readerPool,
                                           tableIndex,
-                                          new XXHashUnsafe(),
-                                          new LRUCache<string, StreamCacheInfo>(ESConsts.StreamMetadataCacheCapacity),
+                                          hasher,
+                                          ESConsts.StreamInfoCacheCapacity,
                                           Application.IsDefined(Application.AdditionalCommitChecks),
                                           Application.IsDefined(Application.InfiniteMetastreams) ? int.MaxValue : 1);
             var writer = new TFChunkWriter(db);
@@ -158,8 +164,8 @@ namespace EventStore.Core
                                                 readerFactory: () => new TFChunkReader(db, db.Config.WriterCheckpoint));
             epochManager.Init();
 
-            var storageWriter = new StorageWriterService(_mainQueue, _mainBus, _settings.MinFlushDelayMs,
-                                                         db, writer, readIndex, epochManager); // subscribes internally
+            var storageWriter = new StorageWriterService(_mainQueue, _mainBus, _settings.MinFlushDelay,
+                                                         db, writer, readIndex.IndexWriter, epochManager); // subscribes internally
             monitoringRequestBus.Subscribe<MonitoringMessage.InternalStatsRequest>(storageWriter);
 
             var storageReader = new StorageReaderService(_mainQueue, _mainBus, readIndex, ESConsts.StorageReaderThreadCount, db.Config.WriterCheckpoint);
@@ -169,17 +175,19 @@ namespace EventStore.Core
             monitoringRequestBus.Subscribe<MonitoringMessage.InternalStatsRequest>(storageReader);
 
             var chaser = new TFChunkChaser(db, db.Config.WriterCheckpoint, db.Config.ChaserCheckpoint);
-            var storageChaser = new StorageChaser(_mainQueue, db.Config.WriterCheckpoint, chaser, readIndex, epochManager);
+            var storageChaser = new StorageChaser(_mainQueue, db.Config.WriterCheckpoint, chaser, readIndex.IndexCommitter, epochManager);
             _mainBus.Subscribe<SystemMessage.SystemInit>(storageChaser);
             _mainBus.Subscribe<SystemMessage.SystemStart>(storageChaser);
             _mainBus.Subscribe<SystemMessage.BecomeShuttingDown>(storageChaser);
 
             var storageScavenger = new StorageScavenger(db,
+                                                        tableIndex,
+                                                        hasher,
                                                         readIndex,
                                                         Application.IsDefined(Application.AlwaysKeepScavenged),
-                                                        mergeChunks: false /*!Application.IsDefined(Application.DisableMergeChunks)*/);
+                                                        mergeChunks: !vNodeSettings.DisableScavengeMerging);
             // ReSharper disable RedundantTypeArgumentsOfMethod
-            _mainBus.Subscribe<SystemMessage.ScavengeDatabase>(storageScavenger);
+            _mainBus.Subscribe<ClientMessage.ScavengeDatabase>(storageScavenger);
             // ReSharper restore RedundantTypeArgumentsOfMethod
 
             // MISC WORKERS
@@ -197,7 +205,7 @@ namespace EventStore.Core
 
             // AUTHENTICATION INFRASTRUCTURE
             var passwordHashAlgorithm = new Rfc2898PasswordHashAlgorithm();
-            var dispatcher = new IODispatcher(_mainBus, new PublishEnvelope(_workersHandler, crossThread: true));
+            var dispatcher = new IODispatcher(_mainQueue, new PublishEnvelope(_workersHandler, crossThread: true));
             var internalAuthenticationProvider = new InternalAuthenticationProvider(dispatcher, passwordHashAlgorithm, ESConsts.CachedPrincipalCount);
             var passwordChangeNotificationReader = new PasswordChangeNotificationReader(_mainQueue, dispatcher);
             _mainBus.Subscribe<SystemMessage.SystemStart>(passwordChangeNotificationReader);
@@ -244,13 +252,13 @@ namespace EventStore.Core
             });
 
             // HTTP
-            var authenticationProviders = new List<AuthenticationProvider>
+            var httpAuthenticationProviders = new List<HttpAuthenticationProvider>
             {
                 new BasicHttpAuthenticationProvider(internalAuthenticationProvider),
             };
             if (_settings.EnableTrustedAuth)
-                authenticationProviders.Add(new TrustedAuthenticationProvider());
-            authenticationProviders.Add(new AnonymousAuthenticationProvider());
+                httpAuthenticationProviders.Add(new TrustedHttpAuthenticationProvider());
+            httpAuthenticationProviders.Add(new AnonymousHttpAuthenticationProvider());
 
             var httpPipe = new HttpMessagePipe();
             var httpSendService = new HttpSendService(httpPipe, forwardRequests: false);
@@ -280,7 +288,7 @@ namespace EventStore.Core
 
             SubscribeWorkers(bus =>
             {
-                HttpService.CreateAndSubscribePipeline(bus, authenticationProviders.ToArray());
+                HttpService.CreateAndSubscribePipeline(bus, httpAuthenticationProviders.ToArray());
             });
 
             // REQUEST MANAGEMENT
@@ -303,20 +311,28 @@ namespace EventStore.Core
 
             // SUBSCRIPTIONS
             var subscrBus = new InMemoryBus("SubscriptionsBus", true, TimeSpan.FromMilliseconds(50));
-            var subscription = new SubscriptionsService(readIndex);
-            subscrBus.Subscribe<TcpMessage.ConnectionClosed>(subscription);
-            subscrBus.Subscribe<ClientMessage.SubscribeToStream>(subscription);
-            subscrBus.Subscribe<ClientMessage.UnsubscribeFromStream>(subscription);
-            subscrBus.Subscribe<StorageMessage.EventCommited>(subscription);
-
             var subscrQueue = new QueuedHandlerThreadPool(subscrBus, "Subscriptions", false);
+            _mainBus.Subscribe(subscrQueue.WidenFrom<SystemMessage.SystemStart, Message>());
+            _mainBus.Subscribe(subscrQueue.WidenFrom<SystemMessage.BecomeShuttingDown, Message>());
             _mainBus.Subscribe(subscrQueue.WidenFrom<TcpMessage.ConnectionClosed, Message>());
             _mainBus.Subscribe(subscrQueue.WidenFrom<ClientMessage.SubscribeToStream, Message>());
             _mainBus.Subscribe(subscrQueue.WidenFrom<ClientMessage.UnsubscribeFromStream, Message>());
+            _mainBus.Subscribe(subscrQueue.WidenFrom<SubscriptionMessage.PollStream, Message>());
+            _mainBus.Subscribe(subscrQueue.WidenFrom<SubscriptionMessage.CheckPollTimeout, Message>());
             _mainBus.Subscribe(subscrQueue.WidenFrom<StorageMessage.EventCommited, Message>());
 
+            var subscription = new SubscriptionsService(_mainQueue, subscrQueue, readIndex);
+            subscrBus.Subscribe<SystemMessage.SystemStart>(subscription);
+            subscrBus.Subscribe<SystemMessage.BecomeShuttingDown>(subscription);
+            subscrBus.Subscribe<TcpMessage.ConnectionClosed>(subscription);
+            subscrBus.Subscribe<ClientMessage.SubscribeToStream>(subscription);
+            subscrBus.Subscribe<ClientMessage.UnsubscribeFromStream>(subscription);
+            subscrBus.Subscribe<SubscriptionMessage.PollStream>(subscription);
+            subscrBus.Subscribe<SubscriptionMessage.CheckPollTimeout>(subscription);
+            subscrBus.Subscribe<StorageMessage.EventCommited>(subscription);
+
             // USER MANAGEMENT
-            var ioDispatcher = new IODispatcher(_mainBus, new PublishEnvelope(_mainQueue));
+            var ioDispatcher = new IODispatcher(_mainQueue, new PublishEnvelope(_mainQueue));
             _mainBus.Subscribe(ioDispatcher.BackwardReader);
             _mainBus.Subscribe(ioDispatcher.ForwardReader);
             _mainBus.Subscribe(ioDispatcher.Writer);
@@ -339,9 +355,8 @@ namespace EventStore.Core
             // TIMER
             _timeProvider = new RealTimeProvider();
             _timerService = new TimerService(new ThreadBasedScheduler(_timeProvider));
-            // ReSharper disable RedundantTypeArgumentsOfMethod
+            _mainBus.Subscribe<SystemMessage.BecomeShutdown>(_timerService);
             _mainBus.Subscribe<TimerMessage.Schedule>(_timerService);
-            // ReSharper restore RedundantTypeArgumentsOfMethod
 
             _workersHandler.Start();
             _mainQueue.Start();

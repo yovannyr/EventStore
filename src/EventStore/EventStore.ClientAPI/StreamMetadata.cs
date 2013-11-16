@@ -77,6 +77,7 @@ namespace EventStore.ClientAPI
     {
         public readonly int? MaxCount;
         public readonly TimeSpan? MaxAge;
+        public readonly int? TruncateBefore;
         public readonly TimeSpan? CacheControl;
         public readonly StreamAcl Acl;
 
@@ -88,26 +89,30 @@ namespace EventStore.ClientAPI
 
         private readonly IDictionary<string, JToken> _customMetadata;
 
-        internal StreamMetadata(int? maxCount, TimeSpan? maxAge, TimeSpan? cacheControl, 
+        internal StreamMetadata(int? maxCount, TimeSpan? maxAge, int? truncateBefore, TimeSpan? cacheControl, 
                                 StreamAcl acl, IDictionary<string, JToken> customMetadata = null)
         {
             if (maxCount <= 0)
                 throw new ArgumentOutOfRangeException("maxCount", string.Format("{0} should be positive value.", SystemMetadata.MaxCount));
             if (maxAge <= TimeSpan.Zero)
                 throw new ArgumentOutOfRangeException("maxAge", string.Format("{0} should be positive time span.", SystemMetadata.MaxAge));
+            if (truncateBefore < 0)
+                throw new ArgumentOutOfRangeException("truncateBefore", string.Format("{0} should be non negative value.", SystemMetadata.TruncateBefore));
+
             if (cacheControl <= TimeSpan.Zero)
                 throw new ArgumentOutOfRangeException("cacheControl", string.Format("{0} should be positive time span.", SystemMetadata.CacheControl));
 
             MaxCount = maxCount;
             MaxAge = maxAge;
+            TruncateBefore = truncateBefore;
             CacheControl = cacheControl;
             Acl = acl;
             _customMetadata = customMetadata ?? Empty.CustomStreamMetadata;  
         }
 
-        public static StreamMetadata Create(int? maxCount = null, TimeSpan? maxAge = null, TimeSpan? cacheControl = null, StreamAcl acl = null)
+        public static StreamMetadata Create(int? maxCount = null, TimeSpan? maxAge = null, int? truncateBefore = null, TimeSpan? cacheControl = null, StreamAcl acl = null)
         {
-            return new StreamMetadata(maxCount, maxAge, cacheControl, acl);
+            return new StreamMetadata(maxCount, maxAge, truncateBefore, cacheControl, acl);
         }
 
         public static StreamMetadataBuilder Build()
@@ -198,6 +203,11 @@ namespace EventStore.ClientAPI
                 jsonWriter.WritePropertyName(SystemMetadata.MaxAge);
                 jsonWriter.WriteValue((long) MaxAge.Value.TotalSeconds);
             }
+            if (TruncateBefore.HasValue)
+            {
+                jsonWriter.WritePropertyName(SystemMetadata.TruncateBefore);
+                jsonWriter.WriteValue(TruncateBefore.Value);
+            }
             if (CacheControl.HasValue)
             {
                 jsonWriter.WritePropertyName(SystemMetadata.CacheControl);
@@ -206,33 +216,7 @@ namespace EventStore.ClientAPI
             if (Acl != null)
             {
                 jsonWriter.WritePropertyName(SystemMetadata.Acl);
-                jsonWriter.WriteStartObject();
-                if (Acl.ReadRole != null)
-                {
-                    jsonWriter.WritePropertyName(SystemMetadata.AclRead);
-                    jsonWriter.WriteValue(Acl.ReadRole);
-                }
-                if (Acl.WriteRole != null)
-                {
-                    jsonWriter.WritePropertyName(SystemMetadata.AclWrite);
-                    jsonWriter.WriteValue(Acl.WriteRole);
-                }
-                if (Acl.DeleteRole != null)
-                {
-                    jsonWriter.WritePropertyName(SystemMetadata.AclDelete);
-                    jsonWriter.WriteValue(Acl.DeleteRole);
-                }
-                if (Acl.MetaReadRole != null)
-                {
-                    jsonWriter.WritePropertyName(SystemMetadata.AclMetaRead);
-                    jsonWriter.WriteValue(Acl.MetaReadRole);
-                }
-                if (Acl.MetaWriteRole != null)
-                {
-                    jsonWriter.WritePropertyName(SystemMetadata.AclMetaWrite);
-                    jsonWriter.WriteValue(Acl.MetaWriteRole);
-                }
-                jsonWriter.WriteEndObject();
+                WriteAcl(jsonWriter, Acl);
             }
             foreach (var customMetadata in _customMetadata)
             {
@@ -240,6 +224,34 @@ namespace EventStore.ClientAPI
                 customMetadata.Value.WriteTo(jsonWriter);
             }
             jsonWriter.WriteEndObject();
+        }
+
+        internal static void WriteAcl(JsonTextWriter jsonWriter, StreamAcl acl)
+        {
+            jsonWriter.WriteStartObject();
+            WriteAclRoles(jsonWriter, SystemMetadata.AclRead, acl.ReadRoles);
+            WriteAclRoles(jsonWriter, SystemMetadata.AclWrite, acl.WriteRoles);
+            WriteAclRoles(jsonWriter, SystemMetadata.AclDelete, acl.DeleteRoles);
+            WriteAclRoles(jsonWriter, SystemMetadata.AclMetaRead, acl.MetaReadRoles);
+            WriteAclRoles(jsonWriter, SystemMetadata.AclMetaWrite, acl.MetaWriteRoles);
+            jsonWriter.WriteEndObject();
+        }
+
+        private static void WriteAclRoles(JsonTextWriter jsonWriter, string propertyName, string[] roles)
+        {
+            if (roles == null)
+                return;
+            jsonWriter.WritePropertyName(propertyName);
+            if (roles.Length == 1)
+            {
+                jsonWriter.WriteValue(roles[0]);
+            }
+            else
+            {
+                jsonWriter.WriteStartArray();
+                Array.ForEach(roles, jsonWriter.WriteValue);
+                jsonWriter.WriteEndArray();
+            }
         }
 
         public static StreamMetadata FromJsonBytes(byte[] json)
@@ -251,6 +263,7 @@ namespace EventStore.ClientAPI
 
                 int? maxCount = null;
                 TimeSpan? maxAge = null;
+                int? truncateBefore = null;
                 TimeSpan? cacheControl = null;
                 StreamAcl acl = null;
                 Dictionary<string, JToken> customMetadata = null;
@@ -278,6 +291,13 @@ namespace EventStore.ClientAPI
                             maxAge = TimeSpan.FromSeconds((long)reader.Value);
                             break;
                         }
+                        case SystemMetadata.TruncateBefore:
+                        {
+                            Check(reader.Read(), reader);
+                            Check(JsonToken.Integer, reader);
+                            truncateBefore = (int)(long)reader.Value;
+                            break;
+                        }
                         case SystemMetadata.CacheControl:
                         {
                             Check(reader.Read(), reader);
@@ -301,20 +321,20 @@ namespace EventStore.ClientAPI
                         }
                     }
                 }
-                return new StreamMetadata(maxCount, maxAge, cacheControl, acl, customMetadata);
+                return new StreamMetadata(maxCount, maxAge, truncateBefore, cacheControl, acl, customMetadata);
             }
         }
 
-        private static StreamAcl ReadAcl(JsonTextReader reader)
+        internal static StreamAcl ReadAcl(JsonTextReader reader)
         {
             Check(reader.Read(), reader);
             Check(JsonToken.StartObject, reader);
 
-            string read = null;
-            string write = null;
-            string delete = null;
-            string metaRead = null;
-            string metaWrite = null;
+            string[] read = null;
+            string[] write = null;
+            string[] delete = null;
+            string[] metaRead = null;
+            string[] metaWrite = null;
 
             while (true)
             {
@@ -322,47 +342,40 @@ namespace EventStore.ClientAPI
                 if (reader.TokenType == JsonToken.EndObject)
                     break;
                 Check(JsonToken.PropertyName, reader);
-                var name = (string) reader.Value;
+                var name = (string)reader.Value;
                 switch (name)
                 {
-                    case SystemMetadata.AclRead:
-                    {
-                        Check(reader.Read(), reader);
-                        Check(JsonToken.String, reader);
-                        read = (string) reader.Value;
-                        break;
-                    }
-                    case SystemMetadata.AclWrite:
-                    {
-                        Check(reader.Read(), reader);
-                        Check(JsonToken.String, reader);
-                        write = (string) reader.Value;
-                        break;
-                    }
-                    case SystemMetadata.AclDelete:
-                    {
-                        Check(reader.Read(), reader);
-                        Check(JsonToken.String, reader);
-                        delete = (string)reader.Value;
-                        break;
-                    }
-                    case SystemMetadata.AclMetaRead:
-                    {
-                        Check(reader.Read(), reader);
-                        Check(JsonToken.String, reader);
-                        metaRead = (string) reader.Value;
-                        break;
-                    }
-                    case SystemMetadata.AclMetaWrite:
-                    {
-                        Check(reader.Read(), reader);
-                        Check(JsonToken.String, reader);
-                        metaWrite = (string) reader.Value;
-                        break;
-                    }
+                    case SystemMetadata.AclRead: read = ReadRoles(reader); break;
+                    case SystemMetadata.AclWrite: write = ReadRoles(reader); break;
+                    case SystemMetadata.AclDelete: delete = ReadRoles(reader); break;
+                    case SystemMetadata.AclMetaRead: metaRead = ReadRoles(reader); break;
+                    case SystemMetadata.AclMetaWrite: metaWrite = ReadRoles(reader); break;
                 }
             }
             return new StreamAcl(read, write, delete, metaRead, metaWrite);
+        }
+
+        private static string[] ReadRoles(JsonTextReader reader)
+        {
+            Check(reader.Read(), reader);
+            if (reader.TokenType == JsonToken.String)
+                return new[] { (string)reader.Value };
+
+            if (reader.TokenType == JsonToken.StartArray)
+            {
+                var roles = new List<string>();
+                while (true)
+                {
+                    Check(reader.Read(), reader);
+                    if (reader.TokenType == JsonToken.EndArray)
+                        break;
+                    Check(JsonToken.String, reader);
+                    roles.Add((string)reader.Value);
+                }
+                return roles.ToArray();
+            }
+
+            throw new Exception("Invalid JSON");
         }
 
         private static void Check(JsonToken type, JsonTextReader reader)
@@ -378,40 +391,17 @@ namespace EventStore.ClientAPI
         }
     }
 
-    public class StreamAcl
-    {
-        public readonly string ReadRole;
-        public readonly string WriteRole;
-        public readonly string DeleteRole;
-        public readonly string MetaReadRole;
-        public readonly string MetaWriteRole;
-
-        public StreamAcl(string readRole, string writeRole, string deleteRole, string metaReadRole, string metaWriteRole)
-        {
-            ReadRole = readRole;
-            WriteRole = writeRole;
-            DeleteRole = deleteRole;
-            MetaReadRole = metaReadRole;
-            MetaWriteRole = metaWriteRole;
-        }
-
-        public override string ToString()
-        {
-            return string.Format("Read: {0}, Write: {1}, Delete: {2}, MetaRead: {3}, MetaWrite: {4}",
-                                 ReadRole, WriteRole, DeleteRole, MetaReadRole, MetaWriteRole);
-        }
-    }
-
     public class StreamMetadataBuilder
     {
         private int? _maxCount;
         private TimeSpan? _maxAge;
+        private int? _truncateBefore;
         private TimeSpan? _cacheControl;
-        private string _aclRead;
-        private string _aclWrite;
-        private string _aclDelete;
-        private string _aclMetaRead;
-        private string _aclMetaWrite;
+        private string[] _aclRead;
+        private string[] _aclWrite;
+        private string[] _aclDelete;
+        private string[] _aclMetaRead;
+        private string[] _aclMetaWrite;
 
         private readonly IDictionary<string, JToken> _customMetadata = new Dictionary<string, JToken>();
 
@@ -428,7 +418,7 @@ namespace EventStore.ClientAPI
                       && builder._aclMetaWrite == null
                               ? null
                               : new StreamAcl(builder._aclRead, builder._aclWrite, builder._aclDelete, builder._aclMetaRead, builder._aclMetaWrite);
-            return new StreamMetadata(builder._maxCount, builder._maxAge, builder._cacheControl, acl, builder._customMetadata);
+            return new StreamMetadata(builder._maxCount, builder._maxAge, builder._truncateBefore, builder._cacheControl, acl, builder._customMetadata);
         }
 
         public StreamMetadataBuilder SetMaxCount(int maxCount)
@@ -445,6 +435,13 @@ namespace EventStore.ClientAPI
             return this;
         }
 
+        public StreamMetadataBuilder SetTruncateBefore(int truncateBefore)
+        {
+            Ensure.Nonnegative(truncateBefore, "truncateBefore");
+            _truncateBefore = truncateBefore;
+            return this;
+        }
+
         public StreamMetadataBuilder SetCacheControl(TimeSpan cacheControl)
         {
             Ensure.Positive(cacheControl.Ticks, "cacheControl");
@@ -454,31 +451,61 @@ namespace EventStore.ClientAPI
 
         public StreamMetadataBuilder SetReadRole(string role)
         {
-            _aclRead = role;
+            _aclRead = role == null ? null : new[] { role };
+            return this;
+        }
+
+        public StreamMetadataBuilder SetReadRoles(string[] roles)
+        {
+            _aclRead = roles;
             return this;
         }
         
         public StreamMetadataBuilder SetWriteRole(string role)
         {
-            _aclWrite = role;
+            _aclWrite = role == null ? null : new[] { role };
+            return this;
+        }
+
+        public StreamMetadataBuilder SetWriteRoles(string[] roles)
+        {
+            _aclWrite = roles;
             return this;
         }
 
         public StreamMetadataBuilder SetDeleteRole(string role)
         {
-            _aclDelete = role;
+            _aclDelete = role == null ? null : new[] { role };
+            return this;
+        }
+
+        public StreamMetadataBuilder SetDeleteRoles(string[] roles)
+        {
+            _aclDelete = roles;
             return this;
         }
 
         public StreamMetadataBuilder SetMetadataReadRole(string role)
         {
-            _aclMetaRead = role;
+            _aclMetaRead = role == null ? null : new[] { role };
+            return this;
+        }
+
+        public StreamMetadataBuilder SetMetadataReadRoles(string[] roles)
+        {
+            _aclMetaRead = roles;
             return this;
         }
 
         public StreamMetadataBuilder SetMetadataWriteRole(string role)
         {
-            _aclMetaWrite = role;
+            _aclMetaWrite = role == null ? null : new[] { role };
+            return this;
+        }
+
+        public StreamMetadataBuilder SetMetadataWriteRoles(string[] roles)
+        {
+            _aclMetaWrite = roles;
             return this;
         }
 
