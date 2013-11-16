@@ -7,23 +7,22 @@ using Microsoft.Win32.SafeHandles;
 
 namespace EventStore.Core.TransactionLog.Chunks
 {
-    public class UnbufferedIOFileStream : Stream
+    public unsafe class UnbufferedIOFileStream : Stream
     {
-        private readonly FileStream _fileStream;
         private readonly byte[] _buffer;
         private readonly int _blockSize;
         private int _bufferedCount;
         private bool _aligned;
         private readonly byte[] _block;
         private long _lastPosition;
+        private bool _needsFlush;
+        private readonly FileStream _regular;
+        private readonly SafeFileHandle _handle;
 
-        private FileStream regular;
-        private bool _needsFlush = false;
-
-        private UnbufferedIOFileStream(FileStream internalFileStream, FileStream regular, int blockSize, int internalBufferSize)
+        private UnbufferedIOFileStream(FileStream regular, SafeFileHandle handle, int blockSize, int internalBufferSize)
         {
-            this.regular = regular;
-            _fileStream = internalFileStream;
+            _regular = regular;
+            _handle = handle;
             _buffer = new byte[internalBufferSize];
             _block = new byte[blockSize];
             _blockSize = blockSize;
@@ -34,13 +33,17 @@ namespace EventStore.Core.TransactionLog.Chunks
                                                     FileAccess acc,
                                                     FileShare share,
                                                     bool sequential,
-                                                    int internalBufferSize)
+                                                    int internalBufferSize,
+                                                    bool writeThrough,
+                                                    uint minBlockSize)
         {
             var blockSize = GetDriveSectorSize.driveSectorSize(path);
+            blockSize = blockSize > minBlockSize ? blockSize : minBlockSize;
             if (internalBufferSize % blockSize != 0) throw new Exception("buffer size must be aligned to block size of " + blockSize + " bytes");
-            int flags = WinApi.FILE_FLAG_NO_BUFFERING;     // default to simmple no buffering
+            int flags = WinApi.FILE_FLAG_NO_BUFFERING;
+            if (writeThrough) flags = flags | WinApi.FILE_FLAG_WRITE_THROUGH;
             /* Construct the proper 'flags' value to pass to CreateFile() */
-            //if (sequential) flags |= WinApi.FILE_FLAG_SEQUENTIAL_SCAN;
+            //if (sequential) flags ;
 
             /* Call the Windows CreateFile() API to open the file */
             var handle = WinApi.CreateFile(path,
@@ -50,17 +53,12 @@ namespace EventStore.Core.TransactionLog.Chunks
                                     mode,
                                     flags,
                                     IntPtr.Zero);
-            FileStream stream = null;
-            if (!handle.IsInvalid)
-            {   /* Wrap the handle in a stream and return it to the caller */
-                stream = new FileStream(handle, acc, internalBufferSize, false);
-            }
-            else                    // if create call failed to get a handle
-            {                       // return a null pointer. 
+            if (handle.IsInvalid)
+            {
                 throw new Win32Exception();
             }
-            var regular = new FileStream(path, mode, acc, FileShare.ReadWrite, 8096);
-            return new UnbufferedIOFileStream(stream, regular, (int)blockSize, internalBufferSize);
+            var regular = new FileStream(path, FileMode.OpenOrCreate, FileAccess.Read, FileShare.ReadWrite);
+            return new UnbufferedIOFileStream(regular, handle, (int)blockSize, internalBufferSize);
         }
 
         public override void Flush()
@@ -70,30 +68,34 @@ namespace EventStore.Core.TransactionLog.Chunks
             var positionAligned = GetLowestAlignment(_lastPosition);
             if (!_aligned)
             {
-                _fileStream.Seek(positionAligned, SeekOrigin.Begin);
+                WinApi.SetFilePointer(_handle, (int)positionAligned, null, WinApi.EMoveMethod.Begin);
             }
             if (_bufferedCount % _blockSize == 0)
             {
-                _fileStream.Write(_buffer, 0, _bufferedCount);
-                _fileStream.Flush(); //TODO use WriteFile here instead of filestream too weird to be copying/flushing
+                InternalWrite(_buffer, (uint)_bufferedCount);
+                _lastPosition = positionAligned + _bufferedCount;
                 _bufferedCount = 0;
-                _lastPosition = _fileStream.Position;
                 _aligned = true;
             }
             else
             {
                 var left = _bufferedCount - aligned;
-                Array.Clear(_block, 0, _block.Length);
-                _fileStream.Write(_buffer, 0, aligned);
-                Buffer.BlockCopy(_buffer, aligned, _block, 0, left); //TODO align in buffer for single write
-                _fileStream.Write(_block, 0, _block.Length);
-                _fileStream.Flush();
-                _lastPosition = _fileStream.Position - 1;
-                var toalign = GetLowestAlignment(_lastPosition);
-                SetBuffer(toalign, left);
+
+                InternalWrite(_buffer, (uint)(aligned + _blockSize)); //write ahead to next block (checkpoint handles)
+                _lastPosition = positionAligned + aligned + left;
+                SetBuffer(left);
                 _bufferedCount = left;
             }
             _needsFlush = false;
+        }
+
+        private void InternalWrite(byte[] buffer, uint count)
+        {
+            int written = 0;
+            if (!WinApi.WriteFile(_handle, buffer, count, ref written, IntPtr.Zero))
+            {
+                throw new Win32Exception();
+            }
         }
 
         public override long Seek(long offset, SeekOrigin origin)
@@ -101,7 +103,7 @@ namespace EventStore.Core.TransactionLog.Chunks
             var aligned = GetLowestAlignment(offset);
             var left = (int)(offset - aligned);
             Flush();
-            SetBuffer(aligned, left);
+            SetBuffer(left);
             return offset;
         }
 
@@ -112,34 +114,45 @@ namespace EventStore.Core.TransactionLog.Chunks
 
         public override void SetLength(long value)
         {
-            var aligned = GetLowestAlignment(value) + _blockSize;
-            _fileStream.SetLength(aligned);
+            var aligned = GetLowestAlignment(value);
+            aligned = aligned == value ? aligned : aligned + _blockSize;
+            WinApi.SetFilePointer(_handle, (int)aligned, null, WinApi.EMoveMethod.Begin);
+            if (!WinApi.SetEndOfFile(_handle))
+            {
+                throw new Win32Exception();
+            }
+            WinApi.FlushFileBuffers(_handle);
+            Seek(0, SeekOrigin.Begin);
         }
 
         public override int Read(byte[] buffer, int offset, int count)
         {
-            regular.Position = _fileStream.Position + _bufferedCount;
-            return regular.Read(buffer, offset, count);
+            _regular.Position = _lastPosition + _bufferedCount;
+            return _regular.Read(buffer, offset, count);
         }
 
         public override void Write(byte[] buffer, int offset, int count)
         {
-            _needsFlush = true;
             var done = false;
             var left = count;
+            var current = offset;
             while (!done)
             {
+                _needsFlush = true;
                 if (_bufferedCount + left < _buffer.Length)
                 {
-                    CopyBuffer(buffer, offset, left);
+                    CopyBuffer(buffer, current, left);
                     done = true;
+                    current += left;
                 }
                 else
                 {
                     var toFill = _buffer.Length - _bufferedCount;
-                    CopyBuffer(buffer, offset, toFill);
+                    CopyBuffer(buffer, current, toFill);
                     Flush();
                     left -= toFill;
+                    current += toFill;
+                    done = left == 0;
                 }
             }
         }
@@ -152,7 +165,7 @@ namespace EventStore.Core.TransactionLog.Chunks
 
         public override bool CanRead
         {
-            get { return true; }
+            get { return false; }
         }
 
         public override bool CanSeek
@@ -167,7 +180,7 @@ namespace EventStore.Core.TransactionLog.Chunks
 
         public override long Length
         {
-            get { return _fileStream.Length; }
+            get { return _regular.Length; }
         }
 
         public override long Position
@@ -175,14 +188,14 @@ namespace EventStore.Core.TransactionLog.Chunks
             get
             {
                 if (_aligned)
-                    return _fileStream.Position + _bufferedCount;
+                    return _lastPosition + _bufferedCount;
                 else
                     return GetLowestAlignment(_lastPosition) + _bufferedCount;
             }
             set { Seek(value, SeekOrigin.Begin); }
         }
 
-        private void SetBuffer(long aligned, int left)
+        private void SetBuffer(int left)
         {
             Buffer.BlockCopy(_buffer, _buffer.Length - left, _buffer, 0, left);
             _bufferedCount = left;
@@ -191,11 +204,74 @@ namespace EventStore.Core.TransactionLog.Chunks
 
         protected override void Dispose(bool disposing)
         {
-            regular.Dispose();
-            _fileStream.Dispose();
+            Flush();
+            _regular.Dispose();
+            _handle.Close();
         }
     }
+    internal static class WinApi
+    {
+        public const int FILE_FLAG_NO_BUFFERING = unchecked((int)0x20000000);
+        public const int FILE_FLAG_OVERLAPPED = unchecked((int)0x40000000);
+        public const int FILE_FLAG_SEQUENTIAL_SCAN = unchecked((int)0x08000000);
+        public const int FILE_FLAG_WRITE_THROUGH = unchecked((int)0x80000000);
+        [DllImport("KERNEL32", SetLastError = true, CharSet = CharSet.Auto, BestFitMapping = false)]
+        public static extern bool GetDiskFreeSpace(string path,
+                                            out uint sectorsPerCluster,
+                                            out uint bytesPerSector,
+                                            out uint numberOfFreeClusters,
+                                            out uint totalNumberOfClusters);
 
+        [DllImport("kernel32.dll", SetLastError = true)]
+        internal static extern bool WriteFile(
+         SafeFileHandle hFile,
+         Byte[] aBuffer,
+         UInt32 cbToWrite,
+         ref int cbThatWereWritten,
+         IntPtr pOverlapped);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        internal static extern UInt32 SetFilePointer(
+         SafeFileHandle hFile,
+         Int32 cbDistanceToMove,
+         IntPtr pDistanceToMoveHigh,
+         EMoveMethod fMoveMethod);
+
+        [DllImport("KERNEL32", SetLastError = true, CharSet = CharSet.Auto, BestFitMapping = false)]
+        public static extern SafeFileHandle CreateFile(String fileName,
+                                                       int desiredAccess,
+                                                       FileShare shareMode,
+                                                       IntPtr securityAttrs,
+                                                       FileMode creationDisposition,
+                                                       int flagsAndAttributes,
+                                                       IntPtr templateFile);
+        public enum EMoveMethod : uint
+        {
+            Begin = 0,
+            Current = 1,
+            End = 2
+        }
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        internal static extern bool SetEndOfFile(
+         SafeFileHandle hFile);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        internal static extern bool FlushFileBuffers(SafeFileHandle filehandle);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool CloseHandle(IntPtr hObject);
+
+        [DllImport("Kernel32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+        public static extern unsafe uint SetFilePointer(
+            [In] SafeFileHandle hFile,
+            [In] int lDistanceToMove,
+            [Out] int* lpDistanceToMoveHigh,
+            [In] EMoveMethod dwMoveMethod);
+
+
+    }
     public class GetDriveSectorSize
     {
         /// <summary>
@@ -210,52 +286,5 @@ namespace EventStore.Core.TransactionLog.Chunks
             WinApi.GetDiskFreeSpace(Path.GetPathRoot(path), out toss, out size, out toss, out toss);
             return size;
         }
-    }
-
-    internal static class WinApi
-    {
-        public const int FILE_FLAG_NO_BUFFERING = unchecked((int)0x20000000);
-        public const int FILE_FLAG_OVERLAPPED = unchecked((int)0x40000000);
-        public const int FILE_FLAG_SEQUENTIAL_SCAN = unchecked((int)0x08000000);
-
-        [DllImport("KERNEL32", SetLastError = true, CharSet = CharSet.Auto, BestFitMapping = false)]
-        public static extern bool GetDiskFreeSpace(string path,
-                                            out uint sectorsPerCluster,
-                                            out uint bytesPerSector,
-                                            out uint numberOfFreeClusters,
-                                            out uint totalNumberOfClusters);
-
-
-        [DllImport("KERNEL32", BestFitMapping = true, CharSet = CharSet.Ansi)]
-        public static extern bool WriteFile(
-            IntPtr hFile,
-            System.Text.StringBuilder lpBuffer,
-            uint nNumberOfBytesToWrite,
-            out uint lpNumberOfBytesWritten,
-            [In] ref System.Threading.NativeOverlapped lpOverlapped);
-
-        [DllImport("KERNEL32", SetLastError = true, CharSet = CharSet.Auto, BestFitMapping = false)]
-        public static extern SafeFileHandle CreateFile(String fileName,
-                                                       int desiredAccess,
-                                                       FileShare shareMode,
-                                                       IntPtr securityAttrs,
-                                                       FileMode creationDisposition,
-                                                       int flagsAndAttributes,
-                                                       IntPtr templateFile);
-        public enum EMoveMethod : uint
-        {
-            Begin = 0,
-            Current = 1,
-            End = 2   
-        }
-
-        [DllImport("Kernel32.dll", SetLastError = true, CharSet = CharSet.Auto)]
-        public static extern unsafe uint SetFilePointer(
-            [In] SafeFileHandle hFile,
-            [In] int lDistanceToMove,
-            [Out] int* lpDistanceToMoveHigh,
-            [In] EMoveMethod dwMoveMethod);
-
-
     }
 }
