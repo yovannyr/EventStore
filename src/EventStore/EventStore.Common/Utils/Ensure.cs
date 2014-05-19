@@ -10,6 +10,12 @@ namespace EventStore.Common.Utils
                 throw new ArgumentNullException(argumentName);
         }
 
+        public static void IsNull<T>(T argument, string argumentName) where T : class
+        {
+            if (argument != null)
+                throw new ArgumentException("Argument should be null", argumentName);
+        }
+
         public static void NotNullOrEmpty(string argument, string argumentName)
         {
             if (string.IsNullOrEmpty(argument))

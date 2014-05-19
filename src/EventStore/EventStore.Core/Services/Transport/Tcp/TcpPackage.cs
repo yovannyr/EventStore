@@ -9,6 +9,7 @@ namespace EventStore.Core.Services.Transport.Tcp
     {
         None = 0x00,
         Authenticated = 0x01,
+        Trusted = 0x02,
     }
 
     public struct TcpPackage
@@ -42,19 +43,24 @@ namespace EventStore.Core.Services.Transport.Tcp
             var headerSize = MandatorySize;
             string login = null;
             string pass = null;
-            if ((flags & TcpFlags.Authenticated) != 0)
+            var flagAuthenticated = (flags & TcpFlags.Authenticated) != 0;
+            var flagTrsuted = (flags & TcpFlags.Trusted) != 0;
+            if (flagAuthenticated || flagTrsuted)
             {
                 var loginLen = data.Array[data.Offset + AuthOffset];
-                if (AuthOffset + 1 + loginLen + 1 >= data.Count)
+                if (AuthOffset + 1 + loginLen + (flagAuthenticated ? 1 /* password length */ : 0) > data.Count)
                     throw new Exception("Login length is too big, it doesn't fit into TcpPackage.");
                 login = Helper.UTF8NoBom.GetString(data.Array, data.Offset + AuthOffset + 1, loginLen);
+                headerSize += 1 + loginLen;
 
-                var passLen = data.Array[data.Offset + AuthOffset + 1 + loginLen];
-                if (AuthOffset + 1 + loginLen + 1 + passLen > data.Count)
-                    throw new Exception("Password length is too big, it doesn't fit into TcpPackage.");
-                pass = Helper.UTF8NoBom.GetString(data.Array, data.Offset + AuthOffset + 1 + loginLen + 1, passLen);
-
-                headerSize += 1 + loginLen + 1 + passLen;
+                if (flagAuthenticated)
+                {
+                    var passLen = data.Array[data.Offset + AuthOffset + 1 + loginLen];
+                    if (AuthOffset + 1 + loginLen + 1 + passLen > data.Count)
+                        throw new Exception("Password length is too big, it doesn't fit into TcpPackage.");
+                    pass = Helper.UTF8NoBom.GetString(data.Array, data.Offset + AuthOffset + 1 + loginLen + 1, passLen);
+                    headerSize += 1 + passLen;
+                }
             }
 
             return new TcpPackage(command,
@@ -82,12 +88,20 @@ namespace EventStore.Core.Services.Transport.Tcp
 
         public TcpPackage(TcpCommand command, TcpFlags flags, Guid correlationId, string login, string password, ArraySegment<byte> data)
         {
+            if ((flags & TcpFlags.Authenticated) != 0 && (flags & TcpFlags.Trusted) != 0)
+                throw new ArgumentException("Both Authenticated and Trusted flags are set");
+
             if ((flags & TcpFlags.Authenticated) != 0)
             {
                 Ensure.NotNull(login, "login");
                 Ensure.NotNull(password, "password");
             }
-            else
+            else if ((flags & TcpFlags.Trusted) != 0)
+            {
+                Ensure.NotNull(login, "login");
+                Ensure.IsNull(password, "password");
+            }
+            else 
             {
                 if (login != null) throw new ArgumentException("Login provided for non-authorized TcpPackage.");
                 if (password != null) throw new ArgumentException("Password provided for non-authorized TcpPackage.");
@@ -103,23 +117,31 @@ namespace EventStore.Core.Services.Transport.Tcp
 
         public byte[] AsByteArray()
         {
-            if ((Flags & TcpFlags.Authenticated) != 0)
+            if ((Flags & TcpFlags.Authenticated) != 0 || (Flags & TcpFlags.Trusted) != 0)
             {
                 var loginLen = Helper.UTF8NoBom.GetByteCount(Login);
-                var passLen = Helper.UTF8NoBom.GetByteCount(Password);
                 if (loginLen > 255) throw new ArgumentException(string.Format("Login serialized length should be less than 256 bytes (but is {0}).", loginLen));
+                var passLen = Password != null ? Helper.UTF8NoBom.GetByteCount(Password) : 0;
                 if (passLen > 255) throw new ArgumentException(string.Format("Password serialized length should be less than 256 bytes (but is {0}).", passLen));
 
-                var res = new byte[MandatorySize + 2 + loginLen + passLen + Data.Count];
+                var res =
+                    new byte[
+                        MandatorySize + 1 + loginLen + Data.Count
+                        + (((Flags & TcpFlags.Authenticated) != 0) ? (1 + passLen) : 0)];
+
                 res[CommandOffset] = (byte) Command;
                 res[FlagsOffset] = (byte) Flags;
                 Buffer.BlockCopy(CorrelationId.ToByteArray(), 0, res, CorrelationOffset, 16);
 
                 res[AuthOffset] = (byte) loginLen;
                 Helper.UTF8NoBom.GetBytes(Login, 0, Login.Length, res, AuthOffset + 1);
-                res[AuthOffset + 1 + loginLen] = (byte)passLen;
-                Helper.UTF8NoBom.GetBytes(Password, 0, Password.Length, res, AuthOffset + 1 + loginLen + 1);
 
+                if ((Flags & TcpFlags.Authenticated) != 0)
+                {
+                    res[AuthOffset + 1 + loginLen] = (byte) passLen;
+                    Helper.UTF8NoBom.GetBytes(Password, 0, Password.Length, res, AuthOffset + 1 + loginLen + 1);
+
+                }
                 Buffer.BlockCopy(Data.Array, Data.Offset, res, res.Length - Data.Count, Data.Count);
                 return res;
             }

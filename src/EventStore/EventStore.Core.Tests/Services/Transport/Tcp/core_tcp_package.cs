@@ -8,6 +8,34 @@ namespace EventStore.Core.Tests.Services.Transport.Tcp
     public class core_tcp_package
     {
         [Test]
+        public void should_throw_argument_exception_when_both_authorized_and_trusted_flags_set()
+        {
+            Assert.Throws<ArgumentException>(
+                () =>
+                    new TcpPackage(
+                        TcpCommand.BadRequest,
+                        TcpFlags.Authenticated | TcpFlags.Trusted,
+                        Guid.NewGuid(),
+                        "login",
+                        "pa$$",
+                        new byte[] {1, 2, 3}));
+        }
+
+        [Test]
+        public void should_throw_argument_null_exception_when_trsuted_but_login_not_provided()
+        {
+            Assert.Throws<ArgumentNullException>(
+                () =>
+                    new TcpPackage(
+                        TcpCommand.BadRequest,
+                        TcpFlags.Trusted,
+                        Guid.NewGuid(),
+                        null,
+                        "pa$$",
+                        new byte[] { 1, 2, 3 }));
+        }
+
+        [Test]
         public void should_throw_argument_null_exception_when_created_as_authorized_but_login_not_provided()
         {
             Assert.Throws<ArgumentNullException>(() =>
@@ -93,6 +121,26 @@ namespace EventStore.Core.Tests.Services.Transport.Tcp
         }
 
         [Test]
+        public void trusted_with_data_should_serialize_and_deserialize_correctly()
+        {
+            var corrId = Guid.NewGuid();
+            var refPkg = new TcpPackage(TcpCommand.BadRequest, TcpFlags.Trusted, corrId, "login", null, new byte[] { 1, 2, 3 });
+            var bytes = refPkg.AsArraySegment();
+
+            var pkg = TcpPackage.FromArraySegment(bytes);
+            Assert.AreEqual(TcpCommand.BadRequest, pkg.Command);
+            Assert.AreEqual(TcpFlags.Trusted, pkg.Flags);
+            Assert.AreEqual(corrId, pkg.CorrelationId);
+            Assert.AreEqual("login", pkg.Login);
+            Assert.IsNull(pkg.Password);
+
+            Assert.AreEqual(3, pkg.Data.Count);
+            Assert.AreEqual(1, pkg.Data.Array[pkg.Data.Offset + 0]);
+            Assert.AreEqual(2, pkg.Data.Array[pkg.Data.Offset + 1]);
+            Assert.AreEqual(3, pkg.Data.Array[pkg.Data.Offset + 2]);
+        }
+
+        [Test]
         public void authorized_with_empty_data_should_serialize_and_deserialize_correctly()
         {
             var corrId = Guid.NewGuid();
@@ -105,6 +153,23 @@ namespace EventStore.Core.Tests.Services.Transport.Tcp
             Assert.AreEqual(corrId, pkg.CorrelationId);
             Assert.AreEqual("login", pkg.Login);
             Assert.AreEqual("pa$$", pkg.Password);
+
+            Assert.AreEqual(0, pkg.Data.Count);
+        }
+
+        [Test]
+        public void trusted_with_empty_data_should_serialize_and_deserialize_correctly()
+        {
+            var corrId = Guid.NewGuid();
+            var refPkg = new TcpPackage(TcpCommand.BadRequest, TcpFlags.Trusted, corrId, "login", null, new byte[0]);
+            var bytes = refPkg.AsArraySegment();
+
+            var pkg = TcpPackage.FromArraySegment(bytes);
+            Assert.AreEqual(TcpCommand.BadRequest, pkg.Command);
+            Assert.AreEqual(TcpFlags.Trusted, pkg.Flags);
+            Assert.AreEqual(corrId, pkg.CorrelationId);
+            Assert.AreEqual("login", pkg.Login);
+            Assert.IsNull(pkg.Password);
 
             Assert.AreEqual(0, pkg.Data.Count);
         }
