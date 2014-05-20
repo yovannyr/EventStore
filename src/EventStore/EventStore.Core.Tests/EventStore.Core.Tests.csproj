@@ -71,6 +71,12 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Authentication\StubPasswordHashAlgorithm.cs" />
+    <Compile Include="Authentication\when_handling_multiple_trusted_requests_with_the_same_correct_user_name.cs" />
+    <Compile Include="Authentication\when_handling_request_with_null.cs" />
+    <Compile Include="Authentication\when_handling_request_with_wrong_password.cs" />
+    <Compile Include="Authentication\when_handling_trusted_and_untrusted_requests.cs" />
+    <Compile Include="Authentication\when_handling_trusted_request_with_wrong_user_name.cs" />
+    <Compile Include="Authentication\when_handling_untrusted_and_trusted_requests.cs" />
     <Compile Include="AwakeService\when_creating.cs" />
     <Compile Include="AwakeService\when_handling_comitted_event.cs" />
     <Compile Include="AwakeService\when_handling_committed_event_after_unsybscribe.cs" />

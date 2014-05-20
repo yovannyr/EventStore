@@ -42,6 +42,14 @@ namespace EventStore.Core.Tests.Authentication
             _error = error;
         }
 
+        public TestAuthenticationRequest(string name, Action unauthorized, Action<IPrincipal> authenticated, Action error)
+            : base(name, trustedWithoutPassword: true)
+        {
+            _unauthorized = unauthorized;
+            _authenticated = authenticated;
+            _error = error;
+        }
+
         public override void Unauthorized()
         {
             _unauthorized();

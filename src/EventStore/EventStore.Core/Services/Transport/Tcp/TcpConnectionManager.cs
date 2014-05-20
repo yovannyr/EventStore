@@ -268,12 +268,17 @@ namespace EventStore.Core.Services.Transport.Tcp
                     {
                         _authProvider.Authenticate(new TcpAuthRequest(this, package, package.Login, package.Password));
                     }
+                    else if ((package.Flags & TcpFlags.Trusted) != 0)
+                    {
+                        _authProvider.Authenticate(new TcpAuthRequest(this, package, package.Login, null));
+                    }
                     else if (defaultUser != null)
                     {
                         if (defaultUser.User != null)
                             UnwrapAndPublishPackage(package, defaultUser.User, defaultUser.Login, defaultUser.Password);
                         else
-                            _authProvider.Authenticate(new TcpAuthRequest(this, package, defaultUser.Login, defaultUser.Password));
+                            _authProvider.Authenticate(
+                                new TcpAuthRequest(this, package, defaultUser.Login, defaultUser.Password));
                     }
                     else
                     {
