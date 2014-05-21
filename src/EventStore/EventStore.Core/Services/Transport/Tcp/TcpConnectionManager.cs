@@ -29,6 +29,7 @@ namespace EventStore.Core.Services.Transport.Tcp
 
         public readonly Guid ConnectionId;
         public readonly string ConnectionName;
+        private readonly TcpServiceType _serviceType = TcpServiceType.External;
         public readonly IPEndPoint RemoteEndPoint;
         public IPEndPoint LocalEndPoint { get { return _connection.LocalEndPoint; } }
         public bool IsClosed { get { return _isClosed != 0; } }
@@ -52,15 +53,17 @@ namespace EventStore.Core.Services.Transport.Tcp
         private readonly IAuthenticationProvider _authProvider;
         private UserCredentials _defaultUser;
 
-        public TcpConnectionManager(string connectionName, 
-                                    ITcpDispatcher dispatcher, 
-                                    IPublisher publisher, 
-                                    ITcpConnection openedConnection,
-                                    IPublisher networkSendQueue,
-                                    IAuthenticationProvider authProvider,
-                                    TimeSpan heartbeatInterval,
-                                    TimeSpan heartbeatTimeout,
-                                    Action<TcpConnectionManager, SocketError> onConnectionClosed)
+        public TcpConnectionManager(
+            string connectionName,
+            TcpServiceType serviceType,
+            ITcpDispatcher dispatcher,
+            IPublisher publisher,
+            ITcpConnection openedConnection,
+            IPublisher networkSendQueue,
+            IAuthenticationProvider authProvider,
+            TimeSpan heartbeatInterval,
+            TimeSpan heartbeatTimeout,
+            Action<TcpConnectionManager, SocketError> onConnectionClosed)
         {
             Ensure.NotNull(dispatcher, "dispatcher");
             Ensure.NotNull(publisher, "publisher");
@@ -70,6 +73,7 @@ namespace EventStore.Core.Services.Transport.Tcp
 
             ConnectionId = openedConnection.ConnectionId;
             ConnectionName = connectionName;
+            _serviceType = serviceType;
 
             _tcpEnvelope = new SendOverTcpEnvelope(this, networkSendQueue);
             _publisher = publisher;
@@ -97,21 +101,22 @@ namespace EventStore.Core.Services.Transport.Tcp
             ScheduleHeartbeat(0);
         }
 
-        public TcpConnectionManager(string connectionName, 
-                                    Guid connectionId,
-                                    ITcpDispatcher dispatcher,
-                                    IPublisher publisher,
-                                    IPEndPoint remoteEndPoint, 
-                                    TcpClientConnector connector,
-                                    bool useSsl,
-                                    string sslTargetHost,
-                                    bool sslValidateServer,
-                                    IPublisher networkSendQueue,
-                                    IAuthenticationProvider authProvider,
-                                    TimeSpan heartbeatInterval,
-                                    TimeSpan heartbeatTimeout,
-                                    Action<TcpConnectionManager> onConnectionEstablished,
-                                    Action<TcpConnectionManager, SocketError> onConnectionClosed)
+        public TcpConnectionManager(
+            string connectionName,
+            Guid connectionId,
+            ITcpDispatcher dispatcher,
+            IPublisher publisher,
+            IPEndPoint remoteEndPoint,
+            TcpClientConnector connector,
+            bool useSsl,
+            string sslTargetHost,
+            bool sslValidateServer,
+            IPublisher networkSendQueue,
+            IAuthenticationProvider authProvider,
+            TimeSpan heartbeatInterval,
+            TimeSpan heartbeatTimeout,
+            Action<TcpConnectionManager> onConnectionEstablished,
+            Action<TcpConnectionManager, SocketError> onConnectionClosed)
         {
             Ensure.NotEmptyGuid(connectionId, "connectionId");
             Ensure.NotNull(dispatcher, "dispatcher");
@@ -124,6 +129,7 @@ namespace EventStore.Core.Services.Transport.Tcp
             ConnectionId = connectionId;
             ConnectionName = connectionName;
 
+            _serviceType = TcpServiceType.Internal; // connecting manager is always internal
             _tcpEnvelope = new SendOverTcpEnvelope(this, networkSendQueue);
             _publisher = publisher;
             _dispatcher = dispatcher;
@@ -140,10 +146,21 @@ namespace EventStore.Core.Services.Transport.Tcp
             _connectionClosed = onConnectionClosed;
 
             RemoteEndPoint = remoteEndPoint;
-            _connection = useSsl 
-                ? connector.ConnectSslTo(ConnectionId, remoteEndPoint, ConnectionTimeout,
-                                         sslTargetHost, sslValidateServer, OnConnectionEstablished, OnConnectionFailed)
-                : connector.ConnectTo(ConnectionId, remoteEndPoint, ConnectionTimeout, OnConnectionEstablished, OnConnectionFailed);
+            _connection = useSsl
+                ? connector.ConnectSslTo(
+                    ConnectionId,
+                    remoteEndPoint,
+                    ConnectionTimeout,
+                    sslTargetHost,
+                    sslValidateServer,
+                    OnConnectionEstablished,
+                    OnConnectionFailed)
+                : connector.ConnectTo(
+                    ConnectionId,
+                    remoteEndPoint,
+                    ConnectionTimeout,
+                    OnConnectionEstablished,
+                    OnConnectionFailed);
             _connection.ConnectionClosed += OnConnectionClosed;
             if (_connection.IsClosed)
                 OnConnectionClosed(_connection, SocketError.Success);
@@ -268,9 +285,10 @@ namespace EventStore.Core.Services.Transport.Tcp
                     {
                         _authProvider.Authenticate(new TcpAuthRequest(this, package, package.Login, package.Password));
                     }
-                    else if ((package.Flags & TcpFlags.Trusted) != 0)
+                    else if ((package.Flags & TcpFlags.Trusted) != 0 && _serviceType == TcpServiceType.Internal)
                     {
-                        _authProvider.Authenticate(new TcpAuthRequest(this, package, package.Login, null));
+                        _authProvider.Authenticate(
+                            new TcpAuthRequest(this, package, package.Login, trustWithoutPassword: true));
                     }
                     else if (defaultUser != null)
                     {
@@ -408,6 +426,13 @@ namespace EventStore.Core.Services.Transport.Tcp
 
             public TcpAuthRequest(TcpConnectionManager manager, TcpPackage package, string login, string password) 
                 : base(login, password)
+            {
+                _manager = manager;
+                _package = package;
+            }
+
+            public TcpAuthRequest(TcpConnectionManager manager, TcpPackage package, string login, bool trustWithoutPassword = false)
+                : base(login, trustWithoutPassword)
             {
                 _manager = manager;
                 _package = package;
