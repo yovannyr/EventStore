@@ -300,13 +300,13 @@ namespace EventStore.Projections.Core.Tests.ClientAPI.Cluster
         }
     }
 
-    [TestFixture, Explicit]
+    [TestFixture]
     public class TestTest : specification_with_standard_projections_runnning
     {
-        [Test, Explicit]
+        [Test]
         public void Test()
         {
-            PostProjection(@"fromStream('$user-admin').outputState()");
+            PostProjection(@"fromStream('$user-admin').when({$any: function(e,s){return {};}}).outputState()");
 
             AssertStreamTail("$projections-test-projection-result", "Result:{}");
         }
