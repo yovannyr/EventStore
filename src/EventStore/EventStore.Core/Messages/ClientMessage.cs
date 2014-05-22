@@ -47,12 +47,19 @@ namespace EventStore.Core.Messages
             public readonly bool RequireMaster;
 
             public readonly IPrincipal User;
+            public readonly bool TrustedWithoutPassword;
             public readonly string Login;
             public readonly string Password;
 
-            protected WriteRequestMessage(Guid internalCorrId,
-                                          Guid correlationId, IEnvelope envelope, bool requireMaster,
-                                          IPrincipal user, string login, string password)
+            protected WriteRequestMessage(
+                Guid internalCorrId,
+                Guid correlationId,
+                IEnvelope envelope,
+                bool requireMaster,
+                IPrincipal user,
+                bool trustedWithoutPassword,
+                string login,
+                string password)
             {
                 Ensure.NotEmptyGuid(internalCorrId, "internalCorrId");
                 Ensure.NotEmptyGuid(correlationId, "correlationId");
@@ -64,6 +71,7 @@ namespace EventStore.Core.Messages
                 RequireMaster = requireMaster;
 
                 User = user;
+                TrustedWithoutPassword = trustedWithoutPassword;
                 Login = login;
                 Password = password;
             }
@@ -143,13 +151,32 @@ namespace EventStore.Core.Messages
             public readonly int ExpectedVersion;
             public readonly Event[] Events;
 
-            public WriteEvents(Guid internalCorrId, Guid correlationId, IEnvelope envelope, bool requireMaster, 
-                               string eventStreamId, int expectedVersion, Event[] events,
-                               IPrincipal user, string login = null, string password = null)
-                : base(internalCorrId, correlationId, envelope, requireMaster, user, login, password)
+            public WriteEvents(
+                Guid internalCorrId,
+                Guid correlationId,
+                IEnvelope envelope,
+                bool requireMaster,
+                string eventStreamId,
+                int expectedVersion,
+                Event[] events,
+                IPrincipal user,
+                string login = null,
+                string password = null,
+                bool trustedWithoutPassword = false)
+
+                : base(
+                    internalCorrId,
+                    correlationId,
+                    envelope,
+                    requireMaster,
+                    user,
+                    trustedWithoutPassword,
+                    login,
+                    password)
             {
                 Ensure.NotNullOrEmpty(eventStreamId, "eventStreamId");
-                if (expectedVersion < Data.ExpectedVersion.Any) throw new ArgumentOutOfRangeException("expectedVersion");
+                if (expectedVersion < Data.ExpectedVersion.Any)
+                    throw new ArgumentOutOfRangeException("expectedVersion");
                 Ensure.NotNull(events, "events");
 
                 EventStreamId = eventStreamId;
@@ -237,18 +264,39 @@ namespace EventStore.Core.Messages
         public class TransactionStart : WriteRequestMessage
         {
             private static readonly int TypeId = Interlocked.Increment(ref NextMsgId);
-            public override int MsgTypeId { get { return TypeId; } }
+
+            public override int MsgTypeId
+            {
+                get { return TypeId; }
+            }
 
             public readonly string EventStreamId;
             public readonly int ExpectedVersion;
 
-            public TransactionStart(Guid internalCorrId, Guid correlationId, IEnvelope envelope, bool requireMaster,
-                                    string eventStreamId, int expectedVersion,
-                                    IPrincipal user, string login = null, string password = null)
-                : base(internalCorrId, correlationId, envelope, requireMaster, user, login, password)
+            public TransactionStart(
+                Guid internalCorrId,
+                Guid correlationId,
+                IEnvelope envelope,
+                bool requireMaster,
+                string eventStreamId,
+                int expectedVersion,
+                IPrincipal user,
+                string login = null,
+                string password = null,
+                bool trustedWithoutPassword = false)
+                : base(
+                    internalCorrId,
+                    correlationId,
+                    envelope,
+                    requireMaster,
+                    user,
+                    trustedWithoutPassword,
+                    login,
+                    password)
             {
                 Ensure.NotNullOrEmpty(eventStreamId, "eventStreamId");
-                if (expectedVersion < Data.ExpectedVersion.Any) throw new ArgumentOutOfRangeException("expectedVersion");
+                if (expectedVersion < Data.ExpectedVersion.Any)
+                    throw new ArgumentOutOfRangeException("expectedVersion");
 
                 EventStreamId = eventStreamId;
                 ExpectedVersion = expectedVersion;
@@ -282,15 +330,35 @@ namespace EventStore.Core.Messages
         public class TransactionWrite : WriteRequestMessage
         {
             private static readonly int TypeId = Interlocked.Increment(ref NextMsgId);
-            public override int MsgTypeId { get { return TypeId; } }
+
+            public override int MsgTypeId
+            {
+                get { return TypeId; }
+            }
 
             public readonly long TransactionId;
             public readonly Event[] Events;
 
-            public TransactionWrite(Guid internalCorrId, Guid correlationId, IEnvelope envelope, bool requireMaster,
-                                    long transactionId, Event[] events,
-                                    IPrincipal user, string login = null, string password = null)
-                : base(internalCorrId, correlationId, envelope, requireMaster, user, login, password)
+            public TransactionWrite(
+                Guid internalCorrId,
+                Guid correlationId,
+                IEnvelope envelope,
+                bool requireMaster,
+                long transactionId,
+                Event[] events,
+                IPrincipal user,
+                string login = null,
+                string password = null,
+                bool trustedWithoutPassword = false)
+                : base(
+                    internalCorrId,
+                    correlationId,
+                    envelope,
+                    requireMaster,
+                    user,
+                    trustedWithoutPassword,
+                    login,
+                    password)
             {
                 Ensure.Nonnegative(transactionId, "transactionId");
                 Ensure.NotNull(events, "events");
@@ -327,13 +395,33 @@ namespace EventStore.Core.Messages
         public class TransactionCommit : WriteRequestMessage
         {
             private static readonly int TypeId = Interlocked.Increment(ref NextMsgId);
-            public override int MsgTypeId { get { return TypeId; } }
+
+            public override int MsgTypeId
+            {
+                get { return TypeId; }
+            }
 
             public readonly long TransactionId;
 
-            public TransactionCommit(Guid internalCorrId, Guid correlationId, IEnvelope envelope, bool requireMaster,
-                                     long transactionId, IPrincipal user, string login = null, string password = null)
-                : base(internalCorrId, correlationId, envelope, requireMaster, user, login, password)
+            public TransactionCommit(
+                Guid internalCorrId,
+                Guid correlationId,
+                IEnvelope envelope,
+                bool requireMaster,
+                long transactionId,
+                IPrincipal user,
+                string login = null,
+                string password = null,
+                bool trustedWithoutPassword = false)
+                : base(
+                    internalCorrId,
+                    correlationId,
+                    envelope,
+                    requireMaster,
+                    user,
+                    trustedWithoutPassword,
+                    login,
+                    password)
             {
                 Ensure.Nonnegative(transactionId, "transactionId");
                 TransactionId = transactionId;
@@ -403,19 +491,41 @@ namespace EventStore.Core.Messages
         public class DeleteStream : WriteRequestMessage
         {
             private static readonly int TypeId = Interlocked.Increment(ref NextMsgId);
-            public override int MsgTypeId { get { return TypeId; } }
+
+            public override int MsgTypeId
+            {
+                get { return TypeId; }
+            }
 
             public readonly string EventStreamId;
             public readonly int ExpectedVersion;
             public readonly bool HardDelete;
 
-            public DeleteStream(Guid internalCorrId, Guid correlationId, IEnvelope envelope, bool requireMaster,
-                                string eventStreamId, int expectedVersion, bool hardDelete,
-                                IPrincipal user, string login = null, string password = null)
-                : base(internalCorrId, correlationId, envelope, requireMaster, user, login, password)
+            public DeleteStream(
+                Guid internalCorrId,
+                Guid correlationId,
+                IEnvelope envelope,
+                bool requireMaster,
+                string eventStreamId,
+                int expectedVersion,
+                bool hardDelete,
+                IPrincipal user,
+                string login = null,
+                string password = null,
+                bool trustedWithoutPassword = false)
+                : base(
+                    internalCorrId,
+                    correlationId,
+                    envelope,
+                    requireMaster,
+                    user,
+                    trustedWithoutPassword,
+                    login,
+                    password)
             {
                 Ensure.NotNullOrEmpty(eventStreamId, "eventStreamId");
-                if (expectedVersion < Data.ExpectedVersion.Any) throw new ArgumentOutOfRangeException("expectedVersion");
+                if (expectedVersion < Data.ExpectedVersion.Any)
+                    throw new ArgumentOutOfRangeException("expectedVersion");
 
                 EventStreamId = eventStreamId;
                 ExpectedVersion = expectedVersion;
