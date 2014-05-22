@@ -210,6 +210,17 @@ namespace EventStore.Projections.Core.Tests.ClientAPI.Cluster
         [Conditional("DEBUG")]
         protected void AssertStreamTail(string streamId, params string[] events)
         {
+            InternalAssertStream(streamId, events, exactLength: false);
+        }
+
+        [Conditional("DEBUG")]
+        protected void AssertStream(string streamId, params string[] events)
+        {
+            InternalAssertStream(streamId, events, exactLength: true);
+        }
+
+        private void InternalAssertStream(string streamId, string[] events, bool exactLength)
+        {
 #if DEBUG
             var result = _conn.ReadStreamEventsBackwardAsync(streamId, -1, events.Length, true, _admin).Result;
             switch (result.Status)
@@ -222,8 +233,9 @@ namespace EventStore.Projections.Core.Tests.ClientAPI.Cluster
                     break;
                 case SliceReadStatus.Success:
                     var resultEventsReversed = result.Events.Reverse().ToArray();
-                    if (resultEventsReversed.Length < events.Length)
-                        DumpFailed("Stream does not contain enough events", streamId, events, result.Events);
+                    if (resultEventsReversed.Length < events.Length
+                        || (exactLength && !result.IsEndOfStream))
+                        DumpFailed("Stream does not contain correct number of events", streamId, events, result.Events);
                     else
                     {
                         for (var index = 0; index < events.Length; index++)
@@ -234,9 +246,8 @@ namespace EventStore.Projections.Core.Tests.ClientAPI.Cluster
 
                             if (resultEventsReversed[index].Event.EventType != eventType)
                                 DumpFailed("Invalid event type", streamId, events, resultEventsReversed);
-                            else
-                                if (resultEventsReversed[index].Event.DebugDataView != eventData)
-                                    DumpFailed("Invalid event body", streamId, events, resultEventsReversed);
+                            else if (resultEventsReversed[index].Event.DebugDataView != eventData)
+                                DumpFailed("Invalid event body", streamId, events, resultEventsReversed);
                         }
                     }
                     break;
@@ -323,7 +334,19 @@ namespace EventStore.Projections.Core.Tests.ClientAPI.Cluster
             MakePost(1, "/trusted-write", admin);
             MakePost(2, "/trusted-write", admin);
 
-            AssertStreamTail("$trusted-write-test", "test:test", "test:test", "test:test");
+            AssertStream("$trusted-write-test", "test:test", "test:test", "test:test");
+        }
+
+        [Test]
+        public void TestUntrustedWrite()
+        {
+            var admin = new NetworkCredential("admin", "changeit");
+
+            MakePost(0, "/untrusted-write", admin);
+            MakePost(1, "/untrusted-write", admin);
+            MakePost(2, "/untrusted-write", admin);
+
+            AssertStream("$untrusted-write-test", "test:test");
         }
 
         protected HttpWebResponse MakePost(int nodeIndex, string path, ICredentials credentials = null)

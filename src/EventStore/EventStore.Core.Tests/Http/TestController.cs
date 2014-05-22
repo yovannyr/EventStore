@@ -26,6 +26,7 @@ namespace EventStore.Core.Tests.Http
         {
             Register(service, "/test1", Test1Handler);
             Register(service, "/trusted-write", TrustedWriteHandler, "POST");
+            Register(service, "/untrusted-write", UntrustedWriteHandler, "POST");
             Register(service, "/test-anonymous", TestAnonymousHandler);
             Register(service, "/test-encoding/{a}?b={b}", TestEncodingHandler);
             Register(service, "/test-encoding-reserved-%20?b={b}", (manager, match) => TestEncodingHandler(manager, match, "%20"));
@@ -53,6 +54,16 @@ namespace EventStore.Core.Tests.Http
 
         private void TrustedWriteHandler(HttpEntityManager http, UriTemplateMatch match)
         {
+            WriteHandler(http, trustedWithoutPassword: true, streamId: "$trusted-write-test");
+        }
+
+        private void UntrustedWriteHandler(HttpEntityManager http, UriTemplateMatch match)
+        {
+            WriteHandler(http, trustedWithoutPassword: false, streamId: "$untrusted-write-test");
+        }
+
+        private void WriteHandler(HttpEntityManager http, bool trustedWithoutPassword, string streamId)
+        {
             if (http.User == null)
             {
                 http.Reply("Not authorized", 401, "Not Authorized", "text/plain");
@@ -71,13 +82,13 @@ namespace EventStore.Core.Tests.Http
                     Guid.NewGuid(),
                     envelope,
                     false,
-                    "$trusted-write-test",
+                    streamId,
                     ExpectedVersion.Any,
                     new Event(Guid.NewGuid(), "test", false, "test", "test"),
                     http.User,
                     http.User.Identity.Name,
                     password: null,
-                    trustedWithoutPassword: true));
+                    trustedWithoutPassword: trustedWithoutPassword));
         }
 
         private void TestAnonymousHandler(HttpEntityManager http, UriTemplateMatch match)
