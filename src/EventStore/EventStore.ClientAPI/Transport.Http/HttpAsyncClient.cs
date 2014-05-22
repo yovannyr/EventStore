@@ -128,11 +128,19 @@ namespace EventStore.ClientAPI.Transport.Http
                 AddAuthenticationHeader(request, userCredentials);
 
             var state = new ClientOperationState(_log, request, onSuccess, onException);
-            state.InputStream = new MemoryStream(bodyBytes);
 
-            var result = request.BeginGetRequestStream(GotRequestStream, state);
-            ThreadPool.RegisterWaitForSingleObject(result.AsyncWaitHandle, TimeoutCallback, request,
-                                                   (int) timeout.TotalMilliseconds, true);
+            if (bodyBytes.Length != 0)
+            {
+                state.InputStream = new MemoryStream(bodyBytes);
+
+                var result = request.BeginGetRequestStream(GotRequestStream, state);
+                ThreadPool.RegisterWaitForSingleObject(result.AsyncWaitHandle, TimeoutCallback, request,
+                                                       (int)timeout.TotalMilliseconds, true);
+            }
+            else
+            {
+                BeginGetResponse(request, state);
+            }
         }
 
         private void AddAuthenticationHeader(HttpWebRequest request, UserCredentials userCredentials)
@@ -219,6 +227,11 @@ namespace EventStore.ClientAPI.Transport.Http
             }
 
             state.Dispose();
+            BeginGetResponse(httpRequest, state);
+        }
+
+        private void BeginGetResponse(HttpWebRequest httpRequest, ClientOperationState state)
+        {
             httpRequest.BeginGetResponse(ResponseAcquired, state);
         }
     }
