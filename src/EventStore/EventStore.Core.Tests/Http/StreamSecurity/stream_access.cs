@@ -69,17 +69,9 @@ namespace EventStore.Core.Tests.Http.StreamSecurity
                 httpWebRequest.ContentType = "application/vnd.eventstore.events+json";
                 httpWebRequest.UseDefaultCredentials = false;
                 httpWebRequest.Headers.Add("ES-TrustedAuth", "root; admin, other");
-                httpWebRequest.GetRequestStream()
-                              .WriteJson(
-                                  new[]
-                                      {
-                                          new
-                                              {
-                                                  EventId = Guid.NewGuid(),
-                                                  EventType = "event-type",
-                                                  Data = new {Some = "Data"}
-                                              }
-                                      });
+                using (var requestStream = httpWebRequest.GetRequestStream())
+                    requestStream.WriteJson(
+                        new[] {new {EventId = Guid.NewGuid(), EventType = "event-type", Data = new {Some = "Data"}}});
                 var request = httpWebRequest;
                 var httpWebResponse = GetRequestResponse(request);
                 var response = httpWebResponse;

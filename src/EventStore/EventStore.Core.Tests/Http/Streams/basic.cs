@@ -122,7 +122,8 @@ namespace EventStore.Core.Tests.Http.Streams
                 var data = "{a : \"1\", b:\"3\", c:\"5\" }";
                 var bytes = Encoding.UTF8.GetBytes(data);
                 request.ContentLength = data.Length;
-                request.GetRequestStream().Write(bytes, 0, data.Length);
+                using (var requestStream = request.GetRequestStream())
+                    requestStream.Write(bytes, 0, data.Length);
                 _response = GetRequestResponse(request);
             }
 
@@ -163,7 +164,8 @@ namespace EventStore.Core.Tests.Http.Streams
                 var data = "{A : \"1\", B:\"3\", C:\"5\" }";
                 var bytes = Encoding.UTF8.GetBytes(data);
                 request.ContentLength = data.Length;
-                request.GetRequestStream().Write(bytes, 0, data.Length);
+                using (var requestStream = request.GetRequestStream())
+                    requestStream.Write(bytes, 0, data.Length);
                 _response = GetRequestResponse(request);
             }
 
@@ -260,8 +262,9 @@ namespace EventStore.Core.Tests.Http.Streams
             {
                 var request = CreateRequest(TestStream + "/", "", "POST", "application/vnd.eventstore.events+json", null);
                 request.AllowAutoRedirect = false;
-                request.GetRequestStream()
-                    .WriteJson(new[] {new {EventId = Guid.NewGuid(), EventType = "event-type", Data = new {A = "1"}}});
+                using (var requestStream = request.GetRequestStream())
+                    requestStream.WriteJson(
+                        new[] {new {EventId = Guid.NewGuid(), EventType = "event-type", Data = new {A = "1"}}});
                 _response = (HttpWebResponse) request.GetResponse();
             }
 
@@ -445,8 +448,9 @@ namespace EventStore.Core.Tests.Http.Streams
             {
                 var request = CreateRequest(TestStream + "/metadata/", "", "POST", "application/json", null);
                 request.AllowAutoRedirect = false;
-                request.GetRequestStream()
-                    .WriteJson(new[] {new {EventId = Guid.NewGuid(), EventType = "event-type", Data = new {A = "1"}}});
+                using (var requestStream = request.GetRequestStream())
+                    requestStream.WriteJson(
+                        new[] {new {EventId = Guid.NewGuid(), EventType = "event-type", Data = new {A = "1"}}});
                 _response = (HttpWebResponse)request.GetResponse();
             }
 

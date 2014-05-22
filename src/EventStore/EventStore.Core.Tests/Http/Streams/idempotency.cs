@@ -67,7 +67,8 @@ namespace EventStore.Core.Tests.Http.Streams
                 var data = "{a : \"1\"}";
                 var bytes = Encoding.UTF8.GetBytes(data);
                 request.ContentLength = data.Length;
-                request.GetRequestStream().Write(bytes, 0, data.Length);
+                using (var requestStream = request.GetRequestStream())
+                    requestStream.Write(bytes, 0, data.Length);
                 _response = GetRequestResponse(request);
             }
         }
@@ -95,7 +96,8 @@ namespace EventStore.Core.Tests.Http.Streams
                 var data = "{a : \"1\"}";
                 var bytes = Encoding.UTF8.GetBytes(data);
                 request.ContentLength = data.Length;
-                request.GetRequestStream().Write(bytes, 0, data.Length);
+                using (var requestStream = request.GetRequestStream())
+                    requestStream.Write(bytes, 0, data.Length);
                 _response = GetRequestResponse(request);
             }
         }
@@ -125,7 +127,8 @@ namespace EventStore.Core.Tests.Http.Streams
                 var data = "{a : \"1\"}";
                 var bytes = Encoding.UTF8.GetBytes(data);
                 request.ContentLength = data.Length;
-                request.GetRequestStream().Write(bytes, 0, data.Length);
+                using (var requestStream = request.GetRequestStream())
+                    requestStream.Write(bytes, 0, data.Length);
                 _response = GetRequestResponse(request);
             }
         }
@@ -157,7 +160,8 @@ namespace EventStore.Core.Tests.Http.Streams
                 var data = "{a : \"1\"}";
                 var bytes = Encoding.UTF8.GetBytes(data);
                 request.ContentLength = data.Length;
-                request.GetRequestStream().Write(bytes, 0, data.Length);
+                using (var requestStream = request.GetRequestStream())
+                    requestStream.Write(bytes, 0, data.Length);
                 _response = GetRequestResponse(request);
             }
         }
@@ -187,7 +191,8 @@ namespace EventStore.Core.Tests.Http.Streams
                 var data = "{a : \"1\"}";
                 var bytes = Encoding.UTF8.GetBytes(data);
                 request.ContentLength = data.Length;
-                request.GetRequestStream().Write(bytes, 0, data.Length);
+                using (var requestStream = request.GetRequestStream())
+                    requestStream.Write(bytes, 0, data.Length);
                 _response = GetRequestResponse(request);
             }
 
@@ -218,7 +223,8 @@ namespace EventStore.Core.Tests.Http.Streams
                 var data = "{a : \"1\"}";
                 var bytes = Encoding.UTF8.GetBytes(data);
                 request.ContentLength = data.Length;
-                request.GetRequestStream().Write(bytes, 0, data.Length);
+                using (var requestStream = request.GetRequestStream())
+                    requestStream.Write(bytes, 0, data.Length);
                 _response = GetRequestResponse(request);
             }
 

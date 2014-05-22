@@ -346,7 +346,8 @@ namespace EventStore.Core.Tests.Http
             string path, string method, T body, ICredentials credentials = null)
         {
             var request = CreateRequest(path, "", method, "application/vnd.eventstore.events+json", credentials);
-            request.GetRequestStream().WriteJson(body);
+            using (var requestStream = request.GetRequestStream())
+                requestStream.WriteJson(body);
             return request;
         }
 
@@ -354,7 +355,8 @@ namespace EventStore.Core.Tests.Http
             string path, string method, T body, ICredentials credentials = null)
         {
             var request = CreateRequest(path, "", method, "application/json", credentials);
-            request.GetRequestStream().WriteJson(body);
+            using (var stream = request.GetRequestStream())
+                stream.WriteJson(body);
             return request;
         }
 
@@ -362,6 +364,7 @@ namespace EventStore.Core.Tests.Http
         {
             var request = CreateRequest(path, "POST", credentials);
             request.ContentLength = 0;
+            request.GetRequestStream().Close();
             return request;
         }
 
