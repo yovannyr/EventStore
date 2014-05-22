@@ -102,7 +102,7 @@ namespace EventStore.Projections.Core.Tests.ClientAPI.Cluster
             _manager = new ProjectionsManager(
                 new ConsoleLogger(),
                 _nodes[0].ExternalHttpEndPoint,
-                TimeSpan.FromMilliseconds(10000));
+                TimeSpan.FromMilliseconds(20000));
 
             if (GivenStandardProjectionsRunning())
                 EnableStandardProjections();
