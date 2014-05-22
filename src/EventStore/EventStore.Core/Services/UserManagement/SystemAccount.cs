@@ -21,7 +21,7 @@ namespace EventStore.Core.Services.UserManagement
 
         private class SystemAccountIdentity: IIdentity
         {
-            public string Name { get { return "system"; } }
+            public string Name { get { return "$system"; } }
             public string AuthenticationType { get { return "system"; } }
             public bool IsAuthenticated { get { return true; } }
         }

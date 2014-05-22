@@ -100,7 +100,7 @@ namespace EventStore.Core.Tests.Helpers
             Node = new ClusterVNode(
                 Db, singleVNodeSettings, dbVerifyHashes: true, memTableEntryCount: memTableSize, subsystems: subsystems,
                 gossipSeedSource: new KnownEndpointGossipSeedSource(gossipSeeds));
-            Node.ExternalHttpService.SetupController(new TestController(Node.MainQueue));
+            Node.ExternalHttpService.SetupController(new TestController(Node.MainQueue, Node.NetworkSendService));
         }
 
         public void Start()

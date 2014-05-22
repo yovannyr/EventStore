@@ -12,6 +12,7 @@ using EventStore.Core;
 using EventStore.Core.Bus;
 using EventStore.Core.Tests;
 using EventStore.Core.Tests.Helpers;
+using EventStore.Core.Tests.Http.Users;
 using EventStore.Projections.Core.Services.Processing;
 using NUnit.Framework;
 using ResolvedEvent = EventStore.ClientAPI.ResolvedEvent;
@@ -88,7 +89,9 @@ namespace EventStore.Projections.Core.Tests.ClientAPI.Cluster
             
 
             _nodes[0].Start();
+            QueueStatsCollector.WaitIdle();
             _nodes[1].Start();
+            QueueStatsCollector.WaitIdle(waitForNonEmptyTf: true);
             _nodes[2].Start();
 
             WaitHandle.WaitAll(new[] { _nodes[0].StartedEvent, _nodes[1].StartedEvent, _nodes[2].StartedEvent });
@@ -309,6 +312,84 @@ namespace EventStore.Projections.Core.Tests.ClientAPI.Cluster
             PostProjection(@"fromStream('$user-admin').when({$any: function(e,s){return {};}}).outputState()");
 
             AssertStreamTail("$projections-test-projection-result", "Result:{}");
+        }
+
+        [Test]
+        public void TestTrustedWrite()
+        {
+            var admin = new NetworkCredential("admin", "changeit");
+
+            MakePost(0, "/trusted-write", admin);
+            MakePost(1, "/trusted-write", admin);
+            MakePost(2, "/trusted-write", admin);
+
+            AssertStreamTail("$trusted-write-test", "test:test", "test:test", "test:test");
+        }
+
+        protected HttpWebResponse MakePost(int nodeIndex, string path, ICredentials credentials = null)
+        {
+            var request = CreateJsonPostRequest(nodeIndex, path, "POST", credentials);
+            request.GetRequestStream().Close();
+            var httpWebResponse = GetRequestResponse(request);
+            Assert.AreEqual(200, (int)(httpWebResponse.StatusCode));
+            return httpWebResponse;
+        }
+
+        protected HttpWebRequest CreateJsonPostRequest(
+            int nodeIndex,
+            string path,
+            string method,
+            ICredentials credentials = null)
+        {
+            var request = CreateRequest(nodeIndex, path, "", method, "application/json", credentials);
+            return request;
+        }
+
+        protected HttpWebRequest CreateRequest(
+            int nodeIndex,
+            string path,
+            string extra,
+            string method,
+            string contentType,
+            ICredentials credentials = null)
+        {
+            var uri = MakeUrl(nodeIndex, path, extra);
+            var request = WebRequest.Create(uri);
+            var httpWebRequest = (HttpWebRequest) request;
+            httpWebRequest.Method = method;
+            httpWebRequest.ContentType = contentType;
+            httpWebRequest.UseDefaultCredentials = false;
+            if (credentials != null)
+            {
+                httpWebRequest.Credentials = credentials;
+                httpWebRequest.PreAuthenticate = true;
+            }
+            return httpWebRequest;
+        }
+
+        protected HttpWebResponse GetRequestResponse(HttpWebRequest request)
+        {
+            HttpWebResponse response;
+            try
+            {
+                response = (HttpWebResponse)request.GetResponse();
+            }
+            catch (WebException ex)
+            {
+                response = (HttpWebResponse)ex.Response;
+            }
+            return response;
+        }
+
+
+        protected Uri MakeUrl(int nodeIndex, string path, string extra = "")
+        {
+            var supplied = new Uri(path, UriKind.RelativeOrAbsolute);
+            if (supplied.IsAbsoluteUri && !supplied.IsFile) // NOTE: is file imporant for mono
+                return supplied;
+
+            var httpEndPoint = _nodeEndpoints[nodeIndex].ExternalHttp; ////
+            return new UriBuilder("http", httpEndPoint.Address.ToString(), httpEndPoint.Port, path, extra).Uri;
         }
     }
 }

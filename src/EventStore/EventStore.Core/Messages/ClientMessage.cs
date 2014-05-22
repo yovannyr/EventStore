@@ -184,11 +184,30 @@ namespace EventStore.Core.Messages
                 Events = events;
             }
 
-            public WriteEvents(Guid internalCorrId, Guid correlationId, IEnvelope envelope, bool requireMaster,
-                               string eventStreamId, int expectedVersion, Event @event,
-                               IPrincipal user, string login = null, string password = null)
-                : this(internalCorrId, correlationId, envelope, requireMaster, eventStreamId, expectedVersion,
-                       @event == null ? null : new[] { @event }, user, login, password)
+            public WriteEvents(
+                Guid internalCorrId,
+                Guid correlationId,
+                IEnvelope envelope,
+                bool requireMaster,
+                string eventStreamId,
+                int expectedVersion,
+                Event @event,
+                IPrincipal user,
+                string login = null,
+                string password = null,
+                bool trustedWithoutPassword = false)
+                : this(
+                    internalCorrId,
+                    correlationId,
+                    envelope,
+                    requireMaster,
+                    eventStreamId,
+                    expectedVersion,
+                    @event == null ? null : new[] {@event},
+                    user,
+                    login,
+                    password,
+                    trustedWithoutPassword)
             {
             }
 

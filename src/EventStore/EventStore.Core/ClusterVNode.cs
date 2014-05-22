@@ -54,6 +54,7 @@ namespace EventStore.Core
         private readonly HttpService _internalHttpService;
         private readonly HttpService _externalHttpService;
         private readonly ITimeProvider _timeProvider;
+        private readonly TFChunkDb _db;
         private readonly ISubsystem[] _subsystems;
 
         private readonly InMemoryBus[] _workerBuses;
@@ -91,6 +92,7 @@ namespace EventStore.Core
             _mainQueue = new QueuedHandler(_controller, "MainQueue");
             _controller.SetMainQueue(_mainQueue);
 
+            _db = db;
             _subsystems = subsystems;
 
             // MONITORING
@@ -168,10 +170,6 @@ namespace EventStore.Core
 
             var chaser = new TFChunkChaser(db, db.Config.WriterCheckpoint, db.Config.ChaserCheckpoint);
             var storageChaser = new StorageChaser(_mainQueue, db.Config.WriterCheckpoint, chaser, readIndex.IndexCommitter, epochManager);
-#if DEBUG
-            QueueStatsCollector.InitializeCheckpoints(
-                _nodeInfo.DebugIndex, db.Config.WriterCheckpoint, db.Config.ChaserCheckpoint);
-#endif
             _mainBus.Subscribe<SystemMessage.SystemInit>(storageChaser);
             _mainBus.Subscribe<SystemMessage.SystemStart>(storageChaser);
             _mainBus.Subscribe<SystemMessage.BecomeShuttingDown>(storageChaser);
@@ -437,6 +435,10 @@ namespace EventStore.Core
 
         public void Start() 
         {
+#if DEBUG
+            QueueStatsCollector.InitializeCheckpoints(
+                _nodeInfo.DebugIndex, _db.Config.WriterCheckpoint, _db.Config.ChaserCheckpoint);
+#endif
             _mainQueue.Publish(new SystemMessage.SystemInit());
 
             if (_subsystems != null)
