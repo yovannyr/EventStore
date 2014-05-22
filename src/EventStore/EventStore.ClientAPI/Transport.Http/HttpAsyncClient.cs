@@ -40,6 +40,7 @@ namespace EventStore.ClientAPI.Transport.Http
                 var req = state as HttpWebRequest;
                 if(req != null)
                 {
+                    _log.Info("Aborting web request to " + req.RequestUri);
                     req.Abort();
                 }
             }
@@ -113,10 +114,17 @@ namespace EventStore.ClientAPI.Transport.Http
                                        (int)timeout.TotalMilliseconds, true);
         }
 
-        private void Send(string method, string url, string body, string contentType, UserCredentials userCredentials, TimeSpan timeout,
-                          Action<HttpResponse> onSuccess, Action<Exception> onException)
+        private void Send(
+            string method,
+            string url,
+            string body,
+            string contentType,
+            UserCredentials userCredentials,
+            TimeSpan timeout,
+            Action<HttpResponse> onSuccess,
+            Action<Exception> onException)
         {
-            var request = (HttpWebRequest)WebRequest.Create(url);
+            var request = (HttpWebRequest) WebRequest.Create(url);
             var bodyBytes = UTF8NoBom.GetBytes(body);
 
             request.Method = method;
@@ -129,18 +137,15 @@ namespace EventStore.ClientAPI.Transport.Http
 
             var state = new ClientOperationState(_log, request, onSuccess, onException);
 
-            if (bodyBytes.Length != 0)
-            {
-                state.InputStream = new MemoryStream(bodyBytes);
+            state.InputStream = new MemoryStream(bodyBytes);
 
-                var result = request.BeginGetRequestStream(GotRequestStream, state);
-                ThreadPool.RegisterWaitForSingleObject(result.AsyncWaitHandle, TimeoutCallback, request,
-                                                       (int)timeout.TotalMilliseconds, true);
-            }
-            else
-            {
-                BeginGetResponse(request, state);
-            }
+            var result = request.BeginGetRequestStream(GotRequestStream, state);
+            ThreadPool.RegisterWaitForSingleObject(
+                result.AsyncWaitHandle,
+                TimeoutCallback,
+                request,
+                (int) timeout.TotalMilliseconds,
+                true);
         }
 
         private void AddAuthenticationHeader(HttpWebRequest request, UserCredentials userCredentials)
