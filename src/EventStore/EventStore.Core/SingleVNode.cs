@@ -202,7 +202,7 @@ namespace EventStore.Core
                 var tcpService = new TcpService(_mainQueue, _settings.ExternalTcpEndPoint, _workersHandler,
                                                 TcpServiceType.External, TcpSecurityType.Normal, new ClientTcpDispatcher(),
                                                 ESConsts.ExternalHeartbeatInterval, ESConsts.ExternalHeartbeatTimeout,
-                                                internalAuthenticationProvider, null);
+                                                internalAuthenticationProvider, enableInterNodeTrustedWrites: false, certificate: null);
                 _mainBus.Subscribe<SystemMessage.SystemInit>(tcpService);
                 _mainBus.Subscribe<SystemMessage.SystemStart>(tcpService);
                 _mainBus.Subscribe<SystemMessage.BecomeShuttingDown>(tcpService);
@@ -214,7 +214,8 @@ namespace EventStore.Core
                 var secureTcpService = new TcpService(_mainQueue, _settings.ExternalSecureTcpEndPoint, _workersHandler,
                                                       TcpServiceType.External, TcpSecurityType.Secure, new ClientTcpDispatcher(),
                                                       ESConsts.ExternalHeartbeatInterval, ESConsts.ExternalHeartbeatTimeout,
-                                                      internalAuthenticationProvider, _settings.Certificate);
+                                                      internalAuthenticationProvider, enableInterNodeTrustedWrites: false, 
+                                                      certificate: _settings.Certificate);
                 _mainBus.Subscribe<SystemMessage.SystemInit>(secureTcpService);
                 _mainBus.Subscribe<SystemMessage.SystemStart>(secureTcpService);
                 _mainBus.Subscribe<SystemMessage.BecomeShuttingDown>(secureTcpService);

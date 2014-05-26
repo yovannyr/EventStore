@@ -192,7 +192,7 @@ namespace EventStore.Core
                 var extTcpService = new TcpService(_mainQueue, _nodeInfo.ExternalTcp, _workersHandler,
                                                    TcpServiceType.External, TcpSecurityType.Normal, new ClientTcpDispatcher(),
                                                    ESConsts.ExternalHeartbeatInterval, ESConsts.ExternalHeartbeatTimeout,
-                                                   authenticationProvider, null);
+                                                   authenticationProvider, enableInterNodeTrustedWrites: false, certificate: null);
                 _mainBus.Subscribe<SystemMessage.SystemInit>(extTcpService);
                 _mainBus.Subscribe<SystemMessage.SystemStart>(extTcpService);
                 _mainBus.Subscribe<SystemMessage.BecomeShuttingDown>(extTcpService);
@@ -203,7 +203,9 @@ namespace EventStore.Core
                     var extSecTcpService = new TcpService(_mainQueue, _nodeInfo.ExternalSecureTcp, _workersHandler,
                                                           TcpServiceType.External, TcpSecurityType.Secure, new ClientTcpDispatcher(),
                                                           ESConsts.ExternalHeartbeatInterval, ESConsts.ExternalHeartbeatTimeout,
-                                                          authenticationProvider, vNodeSettings.Certificate);
+                                                          authenticationProvider, enableInterNodeTrustedWrites: false, 
+                                                          certificate: vNodeSettings.Certificate);
+
                     _mainBus.Subscribe<SystemMessage.SystemInit>(extSecTcpService);
                     _mainBus.Subscribe<SystemMessage.SystemStart>(extSecTcpService);
                     _mainBus.Subscribe<SystemMessage.BecomeShuttingDown>(extSecTcpService);
@@ -214,7 +216,9 @@ namespace EventStore.Core
                                                    TcpServiceType.Internal, TcpSecurityType.Normal,
                                                    new InternalTcpDispatcher(),
                                                    ESConsts.InternalHeartbeatInterval, ESConsts.InternalHeartbeatTimeout,
-                                                   authenticationProvider, null);
+                                                   authenticationProvider, vNodeSettings.EnableInterNodeTrustedWrites, 
+                                                   certificate: null);
+
                 _mainBus.Subscribe<SystemMessage.SystemInit>(intTcpService);
                 _mainBus.Subscribe<SystemMessage.SystemStart>(intTcpService);
                 _mainBus.Subscribe<SystemMessage.BecomeShuttingDown>(intTcpService);
@@ -226,7 +230,9 @@ namespace EventStore.Core
                                                            TcpServiceType.Internal, TcpSecurityType.Secure,
                                                            new InternalTcpDispatcher(),
                                                            ESConsts.InternalHeartbeatInterval, ESConsts.InternalHeartbeatTimeout,
-                                                           authenticationProvider, vNodeSettings.Certificate);
+                                                           authenticationProvider, vNodeSettings.EnableInterNodeTrustedWrites, 
+                                                           vNodeSettings.Certificate);
+
                     _mainBus.Subscribe<SystemMessage.SystemInit>(intSecTcpService);
                     _mainBus.Subscribe<SystemMessage.SystemStart>(intSecTcpService);
                     _mainBus.Subscribe<SystemMessage.BecomeShuttingDown>(intSecTcpService);

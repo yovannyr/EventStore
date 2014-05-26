@@ -215,6 +215,7 @@ namespace EventStore.Core.Util
 	    public const string ClusterGossipPortDescr = "The port on which cluster nodes' managers are running.";
 
  	    public const string GossipSeedDescr = "Endpoints for other cluster nodes from which to seed gossip";
+        public const string EnableInterNodeTrsutedWritesDescr = "Enables inter-node trusted writes when no authentication is performed on a master.";
  		public static readonly IPEndPoint[] GossipSeedDefault = new IPEndPoint[0];
 
         /*

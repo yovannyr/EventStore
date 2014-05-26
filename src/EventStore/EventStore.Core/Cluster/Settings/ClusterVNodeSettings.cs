@@ -43,6 +43,7 @@ namespace EventStore.Core.Cluster.Settings
 	    public bool AdminOnPublic;
 	    public bool StatsOnPublic;
         public bool GossipOnPublic;
+	    public bool EnableInterNodeTrustedWrites;
         public readonly TimeSpan GossipInterval;
         public readonly TimeSpan GossipAllowedTimeDifference;
         public readonly TimeSpan GossipTimeout;
@@ -78,6 +79,7 @@ namespace EventStore.Core.Cluster.Settings
                                     bool adminOnPublic,
                                     bool statsOnPublic,
                                     bool gossipOnPublic,
+                                    bool enableInterNodeTrustedWrites,
                                     TimeSpan gossipInterval,
                                     TimeSpan gossipAllowedTimeDifference,
                                     TimeSpan gossipTimeout)
@@ -137,6 +139,7 @@ namespace EventStore.Core.Cluster.Settings
 	        AdminOnPublic = adminOnPublic;
 	        StatsOnPublic = statsOnPublic;
 	        GossipOnPublic = gossipOnPublic;
+            EnableInterNodeTrustedWrites = enableInterNodeTrustedWrites;
 	        GossipInterval = gossipInterval;
 	        GossipAllowedTimeDifference = gossipAllowedTimeDifference;
 	        GossipTimeout = gossipTimeout;

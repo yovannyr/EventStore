@@ -65,6 +65,8 @@ namespace EventStore.ClusterNode
         public int ClusterGossipPort { get; set; }
         [ArgDescription(Opts.GossipSeedDescr, Opts.ClusterGroup)]
         public IPEndPoint[] GossipSeed { get; set; }
+        [ArgDescription(Opts.EnableInterNodeTrsutedWritesDescr, Opts.ClusterGroup)]
+        public bool EnableInterNodeTrustedWrites { get; set; }
 
         [ArgDescription(Opts.StatsPeriodDescr, Opts.AppGroup)]
         public int StatsPeriodSec { get; set; }

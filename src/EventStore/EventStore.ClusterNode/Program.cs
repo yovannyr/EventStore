@@ -193,7 +193,7 @@ namespace EventStore.ClusterNode
 	                                        options.UseInternalSsl, options.SslTargetHost, options.SslValidateServer,
 	                                        TimeSpan.FromSeconds(options.StatsPeriodSec), StatsStorage.StreamAndCsv,
 											options.NodePriority, authenticationProviderFactory, options.DisableScavengeMerging,
-                                            options.AdminOnExt, options.StatsOnExt, options.GossipOnExt,
+                                            options.AdminOnExt, options.StatsOnExt, options.GossipOnExt, options.EnableInterNodeTrustedWrites,
                                             TimeSpan.FromMilliseconds(options.GossipIntervalMs),
                                             TimeSpan.FromMilliseconds(options.GossipAllowedDifferenceMs),
                                             TimeSpan.FromMilliseconds(options.GossipTimeoutMs));

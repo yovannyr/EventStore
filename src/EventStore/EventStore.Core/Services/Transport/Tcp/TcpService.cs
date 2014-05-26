@@ -39,6 +39,7 @@ namespace EventStore.Core.Services.Transport.Tcp
         private readonly TimeSpan _heartbeatInterval;
         private readonly TimeSpan _heartbeatTimeout;
         private readonly IAuthenticationProvider _authProvider;
+        private readonly bool _enableInterNodeTrustedWrites;
         private readonly X509Certificate _certificate;
 
         public TcpService(IPublisher publisher,
@@ -50,13 +51,14 @@ namespace EventStore.Core.Services.Transport.Tcp
                           TimeSpan heartbeatInterval,
                           TimeSpan heartbeatTimeout,
                           IAuthenticationProvider authProvider,
+                          bool enableInterNodeTrustedWrites,
                           X509Certificate certificate)
             : this(publisher, serverEndPoint, networkSendQueue, serviceType, securityType, (_, __) => dispatcher, 
-                   heartbeatInterval, heartbeatTimeout, authProvider, certificate)
+                   heartbeatInterval, heartbeatTimeout, authProvider, enableInterNodeTrustedWrites, certificate)
         {
         }
 
-        public TcpService(IPublisher publisher, 
+        private TcpService(IPublisher publisher, 
                           IPEndPoint serverEndPoint, 
                           IPublisher networkSendQueue, 
                           TcpServiceType serviceType,
@@ -65,6 +67,7 @@ namespace EventStore.Core.Services.Transport.Tcp
                           TimeSpan heartbeatInterval,
                           TimeSpan heartbeatTimeout,
                           IAuthenticationProvider authProvider,
+                          bool enableInterNodeTrustedWrites,
                           X509Certificate certificate)
         {
             Ensure.NotNull(publisher, "publisher");
@@ -72,6 +75,11 @@ namespace EventStore.Core.Services.Transport.Tcp
             Ensure.NotNull(networkSendQueue, "networkSendQueue");
             Ensure.NotNull(dispatcherFactory, "dispatcherFactory");
             Ensure.NotNull(authProvider, "authProvider");
+            if (serviceType == TcpServiceType.External)
+                if (enableInterNodeTrustedWrites)
+                    throw new ArgumentException(
+                        "enableInterNodeTrustedWrites must be false for external service",
+                        "enableInterNodeTrustedWrites");
             if (securityType == TcpSecurityType.Secure)
                 Ensure.NotNull(certificate, "certificate");
 
@@ -85,6 +93,7 @@ namespace EventStore.Core.Services.Transport.Tcp
             _heartbeatInterval = heartbeatInterval;
             _heartbeatTimeout = heartbeatTimeout;
             _authProvider = authProvider;
+            _enableInterNodeTrustedWrites = enableInterNodeTrustedWrites;
             _certificate = certificate;
         }
 
@@ -126,6 +135,7 @@ namespace EventStore.Core.Services.Transport.Tcp
                     conn,
                     _networkSendQueue,
                     _authProvider,
+                    _enableInterNodeTrustedWrites,
                     _heartbeatInterval,
                     _heartbeatTimeout,
                     (m, e) => _publisher.Publish(new TcpMessage.ConnectionClosed(m, e))); // TODO AN: race condition

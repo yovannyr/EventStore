@@ -51,6 +51,7 @@ namespace EventStore.Core.Services.Transport.Tcp
         private readonly TimeSpan _heartbeatTimeout;
 
         private readonly IAuthenticationProvider _authProvider;
+        private readonly bool _enableInterNodeTrustedWrites;
         private UserCredentials _defaultUser;
 
         public TcpConnectionManager(
@@ -61,6 +62,7 @@ namespace EventStore.Core.Services.Transport.Tcp
             ITcpConnection openedConnection,
             IPublisher networkSendQueue,
             IAuthenticationProvider authProvider,
+            bool enableInterNodeTrustedWrites,
             TimeSpan heartbeatInterval,
             TimeSpan heartbeatTimeout,
             Action<TcpConnectionManager, SocketError> onConnectionClosed)
@@ -79,6 +81,7 @@ namespace EventStore.Core.Services.Transport.Tcp
             _publisher = publisher;
             _dispatcher = dispatcher;
             _authProvider = authProvider;
+            _enableInterNodeTrustedWrites = enableInterNodeTrustedWrites;
 
             _framer = new LengthPrefixMessageFramer();
             _framer.RegisterMessageArrivedCallback(OnMessageArrived);
@@ -285,7 +288,8 @@ namespace EventStore.Core.Services.Transport.Tcp
                     {
                         _authProvider.Authenticate(new TcpAuthRequest(this, package, package.Login, package.Password));
                     }
-                    else if ((package.Flags & TcpFlags.Trusted) != 0 && _serviceType == TcpServiceType.Internal)
+                    else if ((package.Flags & TcpFlags.Trusted) != 0 && _enableInterNodeTrustedWrites
+                             && _serviceType == TcpServiceType.Internal)
                     {
                         _authProvider.Authenticate(
                             new TcpAuthRequest(this, package, package.Login, trustWithoutPassword: true));
@@ -293,7 +297,11 @@ namespace EventStore.Core.Services.Transport.Tcp
                     else if (defaultUser != null)
                     {
                         if (defaultUser.User != null)
-                            UnwrapAndPublishPackage(package, defaultUser.User, defaultUser.Login, defaultUser.Password);
+                            UnwrapAndPublishPackage(
+                                package,
+                                defaultUser.User,
+                                defaultUser.Login,
+                                defaultUser.Password);
                         else
                             _authProvider.Authenticate(
                                 new TcpAuthRequest(this, package, defaultUser.Login, defaultUser.Password));
