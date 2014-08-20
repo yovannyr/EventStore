@@ -284,6 +284,8 @@ namespace EventStore.Core
             var statController = new StatController(monitoringQueue, _workersHandler);
             var atomController = new AtomController(httpSendService, _mainQueue, _workersHandler);
             var gossipController = new GossipController(_mainQueue, _workersHandler, vNodeSettings.GossipTimeout);
+            var persistentSubscriptionController = new PersistentSubscriptionController(httpSendService, _mainQueue,
+                _workersHandler);
             var electController = new ElectController(_mainQueue);
             var guidController = new GuidController(_mainQueue);
 
@@ -294,6 +296,7 @@ namespace EventStore.Core
             // EXTERNAL HTTP
             _externalHttpService = new HttpService(ServiceAccessibility.Public, _mainQueue, new TrieUriRouter(),
                                                     _workersHandler, vNodeSettings.HttpPrefixes);
+            _externalHttpService.SetupController(persistentSubscriptionController);
             if(vNodeSettings.AdminOnPublic)
                 _externalHttpService.SetupController(adminController);
             _externalHttpService.SetupController(pingController);
@@ -317,6 +320,7 @@ namespace EventStore.Core
                 _internalHttpService.SetupController(atomController);
                 _internalHttpService.SetupController(gossipController);
                 _internalHttpService.SetupController(electController);
+                _internalHttpService.SetupController(persistentSubscriptionController);
             }
 			// Authentication plugin HTTP
 	        vNodeSettings.AuthenticationProviderFactory.RegisterHttpControllers(_externalHttpService, _internalHttpService, httpSendService, _mainQueue, _workersHandler);
@@ -326,10 +330,7 @@ namespace EventStore.Core
                 _mainBus.Subscribe<HttpMessage.PurgeTimedOutRequests>(_internalHttpService);
             }
 
-            SubscribeWorkers(bus =>
-            {
-                HttpService.CreateAndSubscribePipeline(bus, httpAuthenticationProviders.ToArray());
-            });
+            SubscribeWorkers(bus => HttpService.CreateAndSubscribePipeline(bus, httpAuthenticationProviders.ToArray()));
 
             // REQUEST FORWARDING
             var forwardingService = new RequestForwardingService(_mainQueue, forwardingProxy, TimeSpan.FromSeconds(1));
