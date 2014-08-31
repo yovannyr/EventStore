@@ -78,7 +78,7 @@ deploy/*
 ndependout
 *.ndproj
 NDependOut
-
+*.sublime-workspace
 *.vsp
 
 *mm_cache.bin
@@ -92,3 +92,4 @@ _dotCover.*
 
 # Mac
 .DS_Store
+
