@@ -9,7 +9,7 @@
     <AppDesignerFolder>Properties</AppDesignerFolder>
     <RootNamespace>EventStore.UpgradeProjections</RootNamespace>
     <AssemblyName>EventStore.UpgradeProjections</AssemblyName>
-    <TargetFrameworkVersion>v4.0</TargetFrameworkVersion>
+    <TargetFrameworkVersion>v4.6</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <TargetFrameworkProfile />
   </PropertyGroup>
@@ -38,6 +38,9 @@
     </Reference>
     <Reference Include="EventStore.Common">
       <HintPath>..\..\bin\intermediate\EventStore.Common.dll</HintPath>
+    </Reference>
+    <Reference Include="EventStore.Rags">
+      <HintPath>..\..\src\libs\EventStore.Rags.dll</HintPath>
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
